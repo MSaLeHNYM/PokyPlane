@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>PokyPlane — Arcade Flight Simulator</title>
+  <link rel="stylesheet" href="/src/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@600;700;800&family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="game-canvas"></canvas>
+    <div id="fps-counter" class="hidden">FPS 60</div>
+
+    <!-- HUD overlay -->
+    <div id="hud" class="hidden">
+      <div class="hud-top">
+        <div class="hud-panel" id="hud-mode">FREE ROAM</div>
+        <div class="hud-panel" id="hud-score"><span data-i18n="score">Score</span>: 0</div>
+        <div class="hud-panel" id="hud-timer">00:00</div>
+        <div class="hud-panel hidden" id="hud-mp">MP</div>
+      </div>
+      <div class="hud-center">
+        <div id="objective"></div>
+      </div>
+      <div class="hud-bottom">
+        <div class="gauge">
+          <div class="gauge-label" data-i18n="spd">SPD</div>
+          <div class="gauge-value" id="hud-speed">0</div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label" data-i18n="alt">ALT</div>
+          <div class="gauge-value" id="hud-alt">0</div>
+        </div>
+        <div class="throttle-wrap">
+          <div class="throttle-label" data-i18n="thr">THR</div>
+          <div class="throttle-bar"><div id="throttle-fill"></div></div>
+        </div>
+        <div class="fuel-wrap hidden" id="fuel-wrap">
+          <div class="fuel-label" data-i18n="fuel">FUEL</div>
+          <div class="fuel-bar"><div id="fuel-fill"></div></div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-label" data-i18n="hdg">HDG</div>
+          <div class="gauge-value" id="hud-heading">N</div>
+        </div>
+        <div class="gauge hud-weapon-gauge">
+          <div class="gauge-label" data-i18n="weapon">WPN</div>
+          <div class="gauge-value" id="hud-weapon">MG</div>
+        </div>
+        <div class="health-wrap">
+          <div class="health-label" data-i18n="hp">HP</div>
+          <div class="health-bar"><div id="health-fill"></div></div>
+        </div>
+      </div>
+      <canvas id="minimap" width="140" height="140"></canvas>
+      <div id="stall-warning" class="hidden" data-i18n="stall">STALL</div>
+      <div id="damage-vignette"></div>
+    </div>
+
+    <!-- Main Menu -->
+    <div id="menu" class="screen">
+      <div class="menu-bg"></div>
+
+      <div id="announce-banner" class="announce-banner" role="status">
+        <span class="announce-icon">✈</span>
+        <p id="announce-text"></p>
+        <button type="button" id="announce-close" class="announce-close" data-i18n-title="closeBanner" title="Dismiss">×</button>
+      </div>
+
+      <div class="lang-switch">
+        <button type="button" class="lang-btn active" data-lang="en">EN</button>
+        <button type="button" class="lang-btn" data-lang="fa">فا</button>
+      </div>
+
+      <div class="menu-content">
+        <h1 class="logo">Poky<span>Plane</span></h1>
+        <p class="tagline" data-i18n="tagline">Arcade skies, cozy vibes</p>
+        <div class="skin-picker">
+          <button type="button" class="skin-btn" data-skin="0" title="Cherry Red">●</button>
+          <button type="button" class="skin-btn active" data-skin="1" title="Sky Blue">●</button>
+          <button type="button" class="skin-btn" data-skin="2" title="Sunny Yellow">●</button>
+        </div>
+        <label class="map-picker">
+          <span data-i18n="mapSelect">Map</span>
+          <select id="menu-map">
+            <option value="meadow">Green Meadows</option>
+            <option value="desert">Sunscar Desert</option>
+            <option value="arctic">Frostbite Peaks</option>
+            <option value="islands">Coral Archipelago</option>
+            <option value="volcanic">Ember Crater</option>
+          </select>
+        </label>
+        <nav class="menu-nav">
+          <button type="button" class="menu-btn primary" data-action="start-freeroam" data-i18n="freeRoam">Free Roam</button>
+          <button type="button" class="menu-btn" data-action="start-race" data-i18n="ringRace">Ring Race</button>
+          <button type="button" class="menu-btn" data-action="start-combat" data-i18n="skyCombat">Sky Combat</button>
+          <button type="button" class="menu-btn" data-action="multiplayer" data-i18n="multiplayer">Multiplayer</button>
+          <button type="button" class="menu-btn" data-action="options" data-i18n="settings">Settings</button>
+        </nav>
+        <p class="hint" data-i18n="hint">Click to enable audio · Esc to pause</p>
+      </div>
+    </div>
+
+    <!-- Multiplayer lobby -->
+    <div id="multiplayer" class="screen hidden">
+      <div class="panel panel-wide">
+        <h2 data-i18n="multiplayerLobby">Multiplayer Lobby</h2>
+        <p class="panel-desc" data-i18n="shareHint">Send this link to a friend — they join the same sky.</p>
+
+        <div id="mp-host-settings" class="mp-box">
+          <p class="mp-status" data-i18n="hostSettings">Host match settings</p>
+          <label class="setting-row">
+            <span data-i18n="mapSelect">Map</span>
+            <select id="mp-map">
+              <option value="meadow">Green Meadows</option>
+              <option value="desert">Sunscar Desert</option>
+              <option value="arctic">Frostbite Peaks</option>
+              <option value="islands">Coral Archipelago</option>
+              <option value="volcanic">Ember Crater</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span data-i18n="mpMode">Mode</span>
+            <select id="mp-mode">
+              <option value="dogfight" data-i18n="dogfight">Dogfight</option>
+              <option value="freefly" data-i18n="freeRoam">Free Roam</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span data-i18n="difficulty">Difficulty</span>
+            <select id="mp-difficulty">
+              <option value="easy" data-i18n="easy">Easy</option>
+              <option value="normal" selected data-i18n="normal">Normal</option>
+              <option value="hard" data-i18n="hard">Hard</option>
+            </select>
+          </label>
+          <label class="setting-row check">
+            <span data-i18n="fuelLimit">Fuel limit</span>
+            <input type="checkbox" id="mp-fuel-limit" />
+          </label>
+          <label class="setting-row check">
+            <span data-i18n="wpnMg">Machine Gun</span>
+            <input type="checkbox" id="mp-wpn-mg" checked />
+          </label>
+          <label class="setting-row check">
+            <span data-i18n="wpnCannon">Cannon</span>
+            <input type="checkbox" id="mp-wpn-cannon" checked />
+          </label>
+          <label class="setting-row check">
+            <span data-i18n="wpnRocket">Rockets</span>
+            <input type="checkbox" id="mp-wpn-rocket" checked />
+          </label>
+          <label class="setting-row check">
+            <span data-i18n="wpnMissile">Missiles</span>
+            <input type="checkbox" id="mp-wpn-missile" checked />
+          </label>
+        </div>
+
+        <div class="mp-actions" style="margin-top:0.75rem">
+          <button type="button" class="menu-btn primary" data-action="mp-host" data-i18n="hostMatch">Host a Match</button>
+        </div>
+        <div id="mp-host-box" class="mp-box hidden">
+          <p id="mp-status" class="mp-status"></p>
+          <code id="mp-room-code" class="mp-code"></code>
+          <div class="mp-row">
+            <input type="text" id="mp-invite-url" readonly />
+            <button type="button" class="menu-btn" data-action="mp-copy" data-i18n="copyLink">Copy Invite Link</button>
+          </div>
+        </div>
+        <hr class="panel-hr" />
+        <label class="stack-label">
+          <span data-i18n="joinMatch">Join via Link / Code</span>
+          <input type="text" id="mp-join-input" data-i18n-placeholder="pasteCode" placeholder="Paste room code" />
+        </label>
+        <div class="mp-row">
+          <button type="button" class="menu-btn primary" data-action="mp-join" data-i18n="join">Join</button>
+          <button type="button" class="menu-btn" data-action="mp-disconnect" data-i18n="disconnect">Disconnect</button>
+        </div>
+        <button type="button" class="menu-btn" data-action="close-multiplayer" data-i18n="back">Back</button>
+      </div>
+    </div>
+
+    <!-- Settings — Simple / Advanced -->
+    <div id="options" class="screen hidden">
+      <div class="settings-shell">
+        <header class="settings-header">
+          <h2 data-i18n="settings">Settings</h2>
+          <div class="settings-mode-toggle">
+            <button type="button" class="mode-tab active" data-settings-mode="simple" data-i18n="simple">Simple</button>
+            <button type="button" class="mode-tab" data-settings-mode="advanced" data-i18n="advanced">Advanced</button>
+          </div>
+        </header>
+
+        <div class="settings-body">
+          <nav class="settings-nav" id="settings-nav-advanced">
+            <button type="button" class="settings-nav-btn active" data-settings-tab="graphics" data-i18n="graphics">Graphics</button>
+            <button type="button" class="settings-nav-btn" data-settings-tab="sound" data-i18n="sound">Sound</button>
+            <button type="button" class="settings-nav-btn" data-settings-tab="gameplay" data-i18n="gameplay">Gameplay</button>
+            <button type="button" class="settings-nav-btn" data-settings-tab="language" data-i18n="language">Language</button>
+          </nav>
+
+          <div class="settings-panels">
+            <!-- SIMPLE VIEW -->
+            <div id="settings-simple" class="settings-pane">
+              <label class="setting-row">
+                <span data-i18n="language">Language</span>
+                <select id="set-language-simple">
+                  <option value="en">English</option>
+                  <option value="fa">فارسی</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span data-i18n="quality">Quality Preset</span>
+                <select id="set-quality-simple">
+                  <option value="low" data-i18n="low">Low</option>
+                  <option value="medium" data-i18n="medium">Medium</option>
+                  <option value="high" data-i18n="high">High</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span data-i18n="masterVolume">Master Volume</span>
+                <input type="range" id="set-master-simple" min="0" max="100" value="70" />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="difficulty">Difficulty</span>
+                <select id="set-difficulty-simple">
+                  <option value="easy" data-i18n="easy">Easy</option>
+                  <option value="normal" data-i18n="normal">Normal</option>
+                  <option value="hard" data-i18n="hard">Hard</option>
+                </select>
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="fuelLimit">Fuel limit</span>
+                <input type="checkbox" id="set-fuellimit-simple" />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="smokeTrail">Smoke Trail</span>
+                <select id="set-smoke-simple">
+                  <option value="off" data-i18n="off">Off</option>
+                  <option value="white" data-i18n="white">White</option>
+                  <option value="red" data-i18n="red">Red</option>
+                  <option value="blue" data-i18n="blue">Blue</option>
+                  <option value="rainbow" data-i18n="rainbow">Rainbow</option>
+                </select>
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="showFps">Show FPS</span>
+                <input type="checkbox" id="set-showfps-simple" />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="chunkDistance">Chunk distance</span>
+                <select id="set-chunkdist-simple">
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4" selected>4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="8">8</option>
+                </select>
+              </label>
+            </div>
+
+            <!-- ADVANCED: Graphics -->
+            <div id="tab-graphics" class="settings-pane advanced-only hidden">
+              <label class="setting-row">
+                <span data-i18n="quality">Quality Preset</span>
+                <select id="set-quality">
+                  <option value="low" data-i18n="low">Low</option>
+                  <option value="medium" data-i18n="medium">Medium</option>
+                  <option value="high" data-i18n="high">High</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span data-i18n="fpsCap">FPS Cap</span>
+                <select id="set-fpscap">
+                  <option value="30">30</option>
+                  <option value="60">60</option>
+                  <option value="120">120</option>
+                  <option value="0" data-i18n="unlimited">Unlimited</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span data-i18n="pixelRatio">Pixel Ratio Cap</span>
+                <input type="range" id="set-pixelratio" min="0.5" max="2" step="0.25" value="1.5" />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="showFps">Show FPS</span>
+                <input type="checkbox" id="set-showfps" />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="shadows">Shadows</span>
+                <input type="checkbox" id="set-shadows" checked />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="antialias">Antialiasing</span>
+                <input type="checkbox" id="set-antialias" checked />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="particles">Particles</span>
+                <input type="checkbox" id="set-particles" checked />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="fog">Fog</span>
+                <input type="checkbox" id="set-fog" checked />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="chunkDistance">Chunk distance</span>
+                <select id="set-chunkdist">
+                  <option value="2">2 (Tiny)</option>
+                  <option value="3">3 (Short)</option>
+                  <option value="4" selected>4 (Normal)</option>
+                  <option value="5">5 (Far)</option>
+                  <option value="6">6 (Very Far)</option>
+                  <option value="8">8 (Extreme)</option>
+                </select>
+              </label>
+              <p class="setting-note" data-i18n="graphicsNote">Some graphics changes apply on next flight.</p>
+            </div>
+
+            <!-- ADVANCED: Sound -->
+            <div id="tab-sound" class="settings-pane advanced-only hidden">
+              <label class="setting-row">
+                <span data-i18n="masterVolume">Master Volume</span>
+                <input type="range" id="set-master" min="0" max="100" value="70" />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="engineVolume">Engine</span>
+                <input type="range" id="set-engine" min="0" max="100" value="100" />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="windVolume">Wind</span>
+                <input type="range" id="set-wind" min="0" max="100" value="100" />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="sfxVolume">Effects</span>
+                <input type="range" id="set-sfx" min="0" max="100" value="100" />
+              </label>
+              <label class="setting-row">
+                <span data-i18n="musicVolume">Music / Ambient</span>
+                <input type="range" id="set-music" min="0" max="100" value="80" />
+              </label>
+            </div>
+
+            <!-- ADVANCED: Gameplay -->
+            <div id="tab-gameplay" class="settings-pane advanced-only hidden">
+              <label class="setting-row">
+                <span data-i18n="difficulty">Difficulty</span>
+                <select id="set-difficulty">
+                  <option value="easy" data-i18n="easy">Easy</option>
+                  <option value="normal" data-i18n="normal">Normal</option>
+                  <option value="hard" data-i18n="hard">Hard</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span data-i18n="smokeTrail">Smoke Trail</span>
+                <select id="set-smoke">
+                  <option value="off" data-i18n="off">Off</option>
+                  <option value="white" data-i18n="white">White</option>
+                  <option value="red" data-i18n="red">Red</option>
+                  <option value="blue" data-i18n="blue">Blue</option>
+                  <option value="rainbow" data-i18n="rainbow">Rainbow</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span data-i18n="defaultCam">Default Camera</span>
+                <select id="set-defaultcam">
+                  <option value="chase" data-i18n="chase">Chase</option>
+                  <option value="near">Close Chase</option>
+                  <option value="high">High Chase</option>
+                  <option value="wing">Wing Cam</option>
+                  <option value="cockpit" data-i18n="cockpit">Cockpit</option>
+                  <option value="nose">Nose Cam</option>
+                  <option value="orbit" data-i18n="orbit">Orbit</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span data-i18n="mouseSens">Mouse Sensitivity</span>
+                <input type="range" id="set-mousesens" min="0.3" max="2.5" step="0.1" value="1" />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="mouseLook">Mouse Look (cockpit)</span>
+                <input type="checkbox" id="set-mouselook" />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="invertY">Invert Pitch</span>
+                <input type="checkbox" id="set-inverty" />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="camShake">Camera Shake</span>
+                <input type="checkbox" id="set-camshake" checked />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="stallAssist">Stall Assist</span>
+                <input type="checkbox" id="set-stallassist" />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="weatherCycle">Dynamic Weather</span>
+                <input type="checkbox" id="set-weather" checked />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="dayNight">Day / Night Cycle</span>
+                <input type="checkbox" id="set-daynight" checked />
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="fuelLimit">Fuel limit</span>
+                <input type="checkbox" id="set-fuellimit" />
+              </label>
+            </div>
+
+            <!-- ADVANCED: Language + Announcement -->
+            <div id="tab-language" class="settings-pane advanced-only hidden">
+              <label class="setting-row">
+                <span data-i18n="language">Language</span>
+                <select id="set-language">
+                  <option value="en">English</option>
+                  <option value="fa">فارسی</option>
+                </select>
+              </label>
+              <label class="setting-row check">
+                <span data-i18n="announcementEdit">Announcement Banner</span>
+                <input type="checkbox" id="set-announce-on" checked />
+              </label>
+              <p class="setting-note" data-i18n="announcementHint">Shown on the main menu for all local players</p>
+              <label class="stack-label">
+                <span>EN</span>
+                <textarea id="set-announce-en" rows="3"></textarea>
+              </label>
+              <label class="stack-label">
+                <span>FA</span>
+                <textarea id="set-announce-fa" rows="3"></textarea>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <footer class="settings-footer">
+          <button type="button" class="menu-btn" data-action="settings-reset" data-i18n="resetDefaults">Reset Defaults</button>
+          <button type="button" class="menu-btn primary" data-action="settings-apply" data-i18n="apply">Apply</button>
+          <button type="button" class="menu-btn" data-action="close-options" data-i18n="back">Back</button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div id="pause" class="screen hidden">
+      <div class="panel">
+        <h2 data-i18n="paused">Paused</h2>
+        <button type="button" class="menu-btn primary" data-action="resume" data-i18n="resume">Resume</button>
+        <button type="button" class="menu-btn" data-action="restart" data-i18n="restart">Restart</button>
+        <button type="button" class="menu-btn" data-action="options-from-pause" data-i18n="settings">Settings</button>
+        <button type="button" class="menu-btn" data-action="quit" data-i18n="quitMenu">Quit to Menu</button>
+      </div>
+    </div>
+
+    <!-- Game Over / Results -->
+    <div id="results" class="screen hidden">
+      <div class="panel">
+        <h2 id="results-title" data-i18n="flightComplete">Flight Complete!</h2>
+        <p id="results-body"></p>
+        <button type="button" class="menu-btn primary" data-action="restart" data-i18n="flyAgain">Fly Again</button>
+        <button type="button" class="menu-btn" data-action="quit" data-i18n="menu">Menu</button>
+      </div>
+    </div>
+
+    <!-- Touch controls (mobile) -->
+    <div id="touch" class="hidden">
+      <div class="stick" id="stick-move"><div class="stick-knob"></div></div>
+      <div class="touch-btns">
+        <button type="button" id="touch-throttle" data-i18n="thr">THR</button>
+        <button type="button" id="touch-fire" data-i18n="fire">FIRE</button>
+      </div>
+    </div>
+
+    <div id="toast"></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

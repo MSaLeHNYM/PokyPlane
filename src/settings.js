@@ -2,20 +2,25 @@
  * Persistent settings — simple presets + advanced overrides.
  * Survives reloads via localStorage.
  */
+import * as THREE from 'three';
+import { cloneKeyBindings, DEFAULT_KEY_BINDINGS, normalizeKeyBindings } from './keybindings.js';
+import { getQualityTier, normalizeQuality } from './quality.js';
+
 const STORAGE_KEY = 'pokyplane_settings_v2';
 
 export const DEFAULT_SETTINGS = {
   language: 'en',
-  // Graphics
-  quality: 'medium',
+  // Graphics — conservative defaults to avoid GPU-driver OS hangs
+  quality: 'low',
   fpsCap: 60, // 0 = unlimited
   showFps: false,
-  shadows: true,
-  antialias: true,
+  shadows: false,
+  antialias: false,
   particles: true,
-  pixelRatio: 1.5,
+  pixelRatio: 1,
   fog: true,
-  chunkDistance: 4, // Minecraft-style render distance (chunks radius)
+  chunkDistance: 4, // legacy — migrated to viewDistanceKm
+  viewDistanceKm: 1,
   // Sound
   masterVolume: 0.7,
   engineVolume: 1,
@@ -34,6 +39,8 @@ export const DEFAULT_SETTINGS = {
   weatherCycle: true,
   dayNight: true,
   fuelLimit: false,
+  airportSpawnChance: 5,
+  keyBindings: cloneKeyBindings(DEFAULT_KEY_BINDINGS),
   // Announcement (host/editor can edit for local banner)
   announcement: {
     en: 'Welcome pilots! Host a match and share the link — fly together.',
@@ -41,6 +48,35 @@ export const DEFAULT_SETTINGS = {
   },
   announcementEnabled: true,
 };
+
+const VIEW_DISTANCE_KM_OPTIONS = [0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000];
+
+function snapViewDistanceKm(km) {
+  const k = clampSetting(km, 0.25, 1000, DEFAULT_SETTINGS.viewDistanceKm);
+  let best = VIEW_DISTANCE_KM_OPTIONS[0];
+  let bestD = Math.abs(k - best);
+  for (const opt of VIEW_DISTANCE_KM_OPTIONS) {
+    const d = Math.abs(k - opt);
+    if (d < bestD) {
+      best = opt;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** Legacy chunk count → km, or read viewDistanceKm directly. */
+function migrateViewDistanceKm(parsed) {
+  if (parsed.viewDistanceKm != null) {
+    return snapViewDistanceKm(parsed.viewDistanceKm);
+  }
+  if (parsed.chunkDistance != null) {
+    return snapViewDistanceKm((parsed.chunkDistance * 64) / 1000);
+  }
+  return DEFAULT_SETTINGS.viewDistanceKm;
+}
+
+export { snapViewDistanceKm };
 
 export function loadSettings() {
   try {
@@ -50,6 +86,12 @@ export function loadSettings() {
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
+      chunkDistance: clampSetting(parsed.chunkDistance, 4, 16, DEFAULT_SETTINGS.chunkDistance),
+      viewDistanceKm: migrateViewDistanceKm(parsed),
+      quality: normalizeQuality(parsed.quality),
+      pixelRatio: clampSetting(parsed.pixelRatio, 1, 2, DEFAULT_SETTINGS.pixelRatio),
+      shadows: !!parsed.shadows,
+      keyBindings: migrateKeyBindings(parsed.keyBindings),
       announcement: { ...DEFAULT_SETTINGS.announcement, ...(parsed.announcement || {}) },
     };
   } catch {
@@ -57,28 +99,63 @@ export function loadSettings() {
   }
 }
 
+/** Drop Ctrl/Meta brake binds — they conflict with browser shortcuts (Ctrl+W). */
+function migrateKeyBindings(raw) {
+  const bindings = normalizeKeyBindings(raw);
+  const brake = bindings.throttleDown;
+  if (brake.some((c) => c.startsWith('Control') || c.startsWith('Meta'))) {
+    bindings.throttleDown = [...DEFAULT_KEY_BINDINGS.throttleDown];
+  }
+  return bindings;
+}
+
 export function saveSettings(settings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
 }
 
 /** Apply renderer/world/sound/particle side-effects from settings. */
-export function applyGraphics(settings, { renderer, world, particles, scene }) {
-  const pr = Math.min(
-    window.devicePixelRatio,
-    settings.quality === 'low' ? 1 : settings.quality === 'high' ? Math.min(2, settings.pixelRatio) : settings.pixelRatio
-  );
+export function applyGraphics(settings, { renderer, world, particles, scene, camera }) {
+  const tier = getQualityTier(normalizeQuality(settings.quality));
+  const pr = Math.min(window.devicePixelRatio || 1, tier.dprCap, settings.pixelRatio || tier.dprCap);
   renderer.setPixelRatio(pr);
-  renderer.shadowMap.enabled = !!settings.shadows && settings.quality !== 'low';
-  if (world?.sun) world.sun.castShadow = renderer.shadowMap.enabled;
-  if (scene?.fog) scene.fog.density = settings.fog ? (scene.fog.density || 0.0018) : 0;
-  if (!settings.fog && scene) scene.fog = null;
-  else if (settings.fog && scene && !scene.fog) {
-    const THREE = window.__THREE_FOG__;
-    // fog restored by world.update if present
+
+  const wantShadows = !!settings.shadows;
+  const shadowMapSize = tier.premium ? 1024 : 512;
+
+  if (wantShadows) {
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    if (world?.sun) {
+      world.sun.castShadow = true;
+      world.sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+    }
+  } else {
+    renderer.shadowMap.enabled = false;
+    renderer.shadowMap.type = THREE.BasicShadowMap;
+    if (world?.sun) world.sun.castShadow = false;
   }
+
+  world?.setShadowsEnabled?.(wantShadows);
+
+  if (tier.toneMapping) {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = tier.exposure;
+  } else {
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.toneMappingExposure = 1;
+  }
+
   if (world) {
-    if (typeof settings.chunkDistance === 'number') {
-      world.setViewRadius?.(settings.chunkDistance);
+    world.setViewDistanceKm?.(settings.viewDistanceKm ?? 1);
+    world.setQuality?.(settings.quality);
+    world.setFogEnabled?.(settings.fog);
+    world.setStripSpawnChance?.(settings.airportSpawnChance ?? 5);
+    if (camera && world.getCameraFar) {
+      camera.far = world.getCameraFar();
+      camera.updateProjectionMatrix();
+    } else if (camera && world.getClipDistance) {
+      camera.far = world.getClipDistance() + 500;
+      camera.updateProjectionMatrix();
     }
   }
   particles?.setQuality(settings.quality);
@@ -88,6 +165,12 @@ export function applyGraphics(settings, { renderer, world, particles, scene }) {
     particles.exhaust.points.visible = settings.particles;
     particles.clouds.points.visible = settings.particles;
   }
+}
+
+export function clampSetting(v, min, max, fallback) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }
 
 export function difficultyMods(diff) {

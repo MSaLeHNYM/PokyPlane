@@ -4,15 +4,29 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev-web.js",
+    "dev:api": "node server/index.js",
+    "dev:all": "concurrently -n web,api -c cyan,magenta \"npm run dev\" \"npm run dev:api\"",
     "build": "vite build",
-    "preview": "vite preview"
+    "logos:transparent": "python3 scripts/remove-checkerboard-bg.py",
+    "preview": "vite preview",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "node server/migrate.js"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
     "peerjs": "^1.5.4",
+    "pg": "^8.13.1",
     "three": "^0.170.0"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "vite": "^6.0.0"
   }
 }

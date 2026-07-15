@@ -89,17 +89,22 @@ export class RingCourse {
 }
 
 export class EnemyFighter {
-  constructor(scene, createPlaneFn, skinIndex, spawn) {
+  constructor(scene, createPlaneFn, skinIndex, spawn, id = 0) {
     const { group, parts } = createPlaneFn(skinIndex);
     group.scale.setScalar(0.9);
     this.group = group;
     this.parts = parts;
+    this.id = id;
     this.position = new THREE.Vector3(spawn.x, spawn.y, spawn.z);
-    this.velocity = new THREE.Vector3(0, 0, -40);
+    this.velocity = new THREE.Vector3(0, 0, -22);
     this.quaternion = new THREE.Quaternion();
     this.health = 40;
     this.alive = true;
     this.cooldown = 0;
+    /** Static flare evasion chance per enemy — 40% to 80%. */
+    this.flareEvasionChance = 0.4 + Math.random() * 0.4;
+    this.flaresLeft = 2;
+    this.flareCooldown = 0;
     scene.add(group);
   }
 
@@ -108,8 +113,8 @@ export class EnemyFighter {
 
     // Simple pursuit: steer toward player
     const toPlayer = playerPos.clone().sub(this.position).normalize();
-    const desired = toPlayer.clone().multiplyScalar(55);
-    this.velocity.lerp(desired, 1 - Math.exp(-1.5 * dt));
+    const desired = toPlayer.clone().multiplyScalar(34);
+    this.velocity.lerp(desired, 1 - Math.exp(-1.05 * dt));
 
     // Face velocity (plane nose is local +Z)
     if (this.velocity.lengthSq() > 1) {
@@ -124,6 +129,7 @@ export class EnemyFighter {
     this.group.position.copy(this.position);
     this.group.quaternion.copy(this.quaternion);
     this.cooldown = Math.max(0, this.cooldown - dt);
+    this.flareCooldown = Math.max(0, this.flareCooldown - dt);
   }
 
   hit(dmg = 20) {
@@ -146,26 +152,143 @@ export class CombatWave {
     this.scene = scene;
     this.createPlaneFn = createPlaneFn;
     this.enemies = [];
+    this.decoys = [];
     this.wave = 1;
     this.score = 0;
+    this.started = false;
+    this._nextEnemyId = 0;
     this.bullets = [];
     this.enemyBullets = [];
     this._bulletPool = [];
     this._geo = new THREE.SphereGeometry(0.25, 6, 6);
     this._matPlayer = new THREE.MeshBasicMaterial({ color: 0xffe066 });
     this._matEnemy = new THREE.MeshBasicMaterial({ color: 0xff4466 });
+    this._matFlare = new THREE.MeshBasicMaterial({ color: 0xffaa44 });
+    this._flareGeo = new THREE.SphereGeometry(0.45, 6, 6);
   }
 
-  spawnWave() {
+  /** Wait until player is airborne before spawning wave 1. */
+  tryStart(player, getHeight) {
+    if (this.started) return true;
+    const gh = getHeight(player.position.x, player.position.z);
+    const agl = player.position.y - gh;
+    const airborne =
+      !player.onGround && agl > 14 && player.airspeed > 22 && player.phase !== 'taxi';
+    if (!airborne) return false;
+    this.started = true;
+    this.spawnWave(player.position);
+    return true;
+  }
+
+  spawnWave(anchor) {
+    const cx = anchor?.x ?? 0;
+    const cz = anchor?.z ?? 0;
+    const cy = anchor?.y ?? 60;
     const n = 2 + this.wave;
+    const dist = 320 + this.wave * 45;
     for (let i = 0; i < n; i++) {
-      const ang = (i / n) * Math.PI * 2;
-      const e = new EnemyFighter(this.scene, this.createPlaneFn, (i + 1) % 3, {
-        x: Math.cos(ang) * 80,
-        y: 40 + Math.random() * 20,
-        z: Math.sin(ang) * 80 - 60,
-      });
+      const ang = (i / n) * Math.PI * 2 + Math.random() * 0.4;
+      const warTypes = [3, 5, 7, 1, 4, 0, 2, 6];
+      const id = this._nextEnemyId++;
+      const e = new EnemyFighter(
+        this.scene,
+        this.createPlaneFn,
+        warTypes[i % warTypes.length],
+        {
+          x: cx + Math.cos(ang) * dist,
+          y: cy + 20 + Math.random() * 35,
+          z: cz + Math.sin(ang) * dist,
+        },
+        id
+      );
       this.enemies.push(e);
+    }
+  }
+
+  /** Active flare decoys for missile guidance + edge HUD. */
+  getDecoyTargets() {
+    const out = [];
+    for (const d of this.decoys) {
+      if (d.life <= 0) continue;
+      out.push({
+        position: d.position,
+        radius: 2.2,
+        id: d.id,
+        kind: 'flare',
+        owner: 'ai',
+        ref: d,
+      });
+    }
+    return out;
+  }
+
+  _spawnFlare(enemy, onFlare) {
+    if (enemy.flaresLeft <= 0 || enemy.flareCooldown > 0) return false;
+    enemy.flaresLeft--;
+    enemy.flareCooldown = 4.5 + Math.random() * 2;
+
+    const back = enemy.velocity.clone().normalize().multiplyScalar(-1);
+    if (back.lengthSq() < 0.01) back.set(0, 0, 1);
+    const pos = enemy.position.clone().addScaledVector(back, 6 + Math.random() * 4);
+    pos.y += 2 + Math.random() * 3;
+
+    const decoy = {
+      id: `flare-${enemy.id}-${Date.now()}`,
+      position: pos,
+      vel: back.clone().multiplyScalar(18 + Math.random() * 12),
+      life: 2.4 + Math.random() * 0.8,
+      enemyId: enemy.id,
+      mesh: null,
+    };
+
+    const mesh = new THREE.Mesh(this._flareGeo, this._matFlare);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+    decoy.mesh = mesh;
+    this.decoys.push(decoy);
+    onFlare?.(pos.clone(), enemy.id);
+    return true;
+  }
+
+  /** Enemies react to incoming homing missiles with flares. */
+  _updateFlares(dt, incomingMissiles, onFlare) {
+    for (const e of this.enemies) {
+      if (!e.alive || e.flaresLeft <= 0 || e.flareCooldown > 0) continue;
+
+      for (const m of incomingMissiles) {
+        if (m.lockId !== e.id && m.lockKind !== 'ai') continue;
+        const toMissile = m.pos.clone().sub(e.position);
+        const dist = toMissile.length();
+        if (dist > 220 || dist < 35) continue;
+
+        const closing = m.vel.dot(toMissile.normalize()) < 0;
+        if (!closing) continue;
+
+        const tti = dist / Math.max(40, m.vel.length());
+        if (tti > 2.8 || tti < 0.55) continue;
+
+        if (Math.random() < e.flareEvasionChance) {
+          this._spawnFlare(e, onFlare);
+        } else {
+          e.flareCooldown = 1.2;
+        }
+        break;
+      }
+    }
+
+    for (let i = this.decoys.length - 1; i >= 0; i--) {
+      const d = this.decoys[i];
+      d.life -= dt;
+      d.position.addScaledVector(d.vel, dt);
+      d.vel.multiplyScalar(1 - dt * 0.35);
+      if (d.mesh) d.mesh.position.copy(d.position);
+      if (d.life <= 0) {
+        if (d.mesh) {
+          this.scene.remove(d.mesh);
+          d.mesh = null;
+        }
+        this.decoys.splice(i, 1);
+      }
     }
   }
 
@@ -178,29 +301,37 @@ export class CombatWave {
     mesh.material = isPlayer ? this._matPlayer : this._matEnemy;
     mesh.visible = true;
     mesh.position.copy(from);
-    const bullet = { mesh, vel: dir.clone().multiplyScalar(isPlayer ? 180 : 100), life: 2, isPlayer };
+    const bullet = { mesh, vel: dir.clone().multiplyScalar(isPlayer ? 180 : 72), life: 2, isPlayer };
     (isPlayer ? this.bullets : this.enemyBullets).push(bullet);
   }
 
-  update(dt, player, getHeight, onEnemyKill, onPlayerHit) {
+  update(dt, player, getHeight, onEnemyKill, onPlayerHit, incomingMissiles = [], onFlare) {
+    if (!this.tryStart(player, getHeight)) return;
+
+    this._updateFlares(dt, incomingMissiles, onFlare);
+
     // Enemies
     let alive = 0;
     for (const e of this.enemies) {
       if (!e.alive) continue;
       alive++;
       e.update(dt, player.position, getHeight);
-      // Occasional enemy fire
-      if (e.cooldown <= 0 && e.position.distanceTo(player.position) < 120) {
+      // Occasional enemy fire — only after combat started and player airborne
+      if (
+        e.cooldown <= 0 &&
+        !player.onGround &&
+        e.position.distanceTo(player.position) < 120
+      ) {
         const dir = player.position.clone().sub(e.position).normalize();
         this.fireBullet(e.position.clone(), dir, false);
-        e.cooldown = 1.2 + Math.random();
+        e.cooldown = 1.6 + Math.random() * 0.8;
       }
     }
 
     if (alive === 0 && this.enemies.length) {
       this.wave++;
       this.enemies = this.enemies.filter((e) => e.alive);
-      this.spawnWave();
+      this.spawnWave(player.position);
     }
 
     // Player bullets vs enemies
@@ -246,6 +377,10 @@ export class CombatWave {
 
   dispose() {
     this.enemies.forEach((e) => e.dispose(this.scene));
+    for (const d of this.decoys) {
+      if (d.mesh) this.scene.remove(d.mesh);
+    }
+    this.decoys = [];
     [...this.bullets, ...this.enemyBullets, ...this._bulletPool].forEach((b) => {
       const m = b.mesh || b;
       this.scene.remove(m);

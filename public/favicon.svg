@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="PokyPlane">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5eb8e8"/>
+      <stop offset="100%" stop-color="#1a6aa8"/>
+    </linearGradient>
+    <linearGradient id="a" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffd166"/>
+      <stop offset="100%" stop-color="#ff6b4a"/>
+    </linearGradient>
+  </defs>
+  <circle cx="48" cy="48" r="44" fill="url(#g)" opacity="0.25"/>
+  <g transform="translate(48, 50)">
+    <ellipse cx="0" cy="0" rx="26" ry="9" fill="#457b9d"/>
+    <path d="M24 0 L36 0 L30 -6 L30 6 Z" fill="#ff6b4a"/>
+    <ellipse cx="6" cy="-3" rx="7" ry="4.5" fill="#7dd3fc"/>
+    <path d="M-4 0 L10 -10 L10 10 Z" fill="#3b82f6"/>
+    <path d="M-22 0 L-12 -9 L-12 9 Z" fill="url(#a)"/>
+    <circle cx="32" cy="0" r="5" fill="#ffd166" opacity="0.5"/>
+  </g>
+</svg>

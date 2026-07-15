@@ -1,9 +1,7 @@
 /**
- * Simplex-style 2D/3D value noise for terrain & cloud placement.
- * Self-contained — no external noise textures or libraries.
+ * 2D gradient noise + terrain helpers (fbm, ridged, domain warp).
+ * Self-contained — no external textures or libraries.
  */
-const F2 = 0.5 * (Math.sqrt(3) - 1);
-const G2 = (3 - Math.sqrt(3)) / 6;
 
 function fade(t) {
   return t * t * t * (t * (t * 6 - 15) + 10);
@@ -29,7 +27,6 @@ export function createNoise(seed = 1337) {
     s = (s * 1664525 + 1013904223) >>> 0;
     perm[i] = i;
   }
-  // Fisher–Yates shuffle
   for (let i = 255; i > 0; i--) {
     s = (s * 1664525 + 1013904223) >>> 0;
     const j = s % (i + 1);
@@ -55,7 +52,7 @@ export function createNoise(seed = 1337) {
     return lerp(x1, x2, v);
   }
 
-  /** Fractal Brownian motion — stacked octaves of noise. */
+  /** Fractal Brownian motion — smooth rolling hills. */
   function fbm(x, y, octaves = 4, lacunarity = 2, gain = 0.5) {
     let amp = 1;
     let freq = 1;
@@ -70,5 +67,55 @@ export function createNoise(seed = 1337) {
     return sum / max;
   }
 
-  return { noise2, fbm };
+  /** Ridged multifractal — sharp mountain ridges with natural weighting. */
+  function ridgedFbm(x, y, octaves = 4, lacunarity = 2.1, gain = 0.52) {
+    let amp = 0.5;
+    let freq = 1;
+    let sum = 0;
+    let weight = 1;
+    for (let i = 0; i < octaves; i++) {
+      let n = noise2(x * freq, y * freq);
+      n = 1 - Math.abs(n);
+      n *= n;
+      n *= weight;
+      sum += n * amp;
+      weight = Math.min(1, Math.max(0, n * 2.1));
+      amp *= gain;
+      freq *= lacunarity;
+    }
+    return sum;
+  }
+
+  /** Billow noise — soft rounded bumps (dunes, cloud-like hills). */
+  function billowFbm(x, y, octaves = 4, lacunarity = 2, gain = 0.5) {
+    let amp = 1;
+    let freq = 1;
+    let sum = 0;
+    let max = 0;
+    for (let i = 0; i < octaves; i++) {
+      sum += Math.abs(noise2(x * freq, y * freq)) * amp;
+      max += amp;
+      amp *= gain;
+      freq *= lacunarity;
+    }
+    return sum / max;
+  }
+
+  /**
+   * Domain warp — offsets (x,z) by fbm for organic, non-grid-aligned features.
+   * @returns {{ x: number, y: number }}
+   */
+  function warp2(x, y, strength = 1, octaves = 3) {
+    const wx = fbm(x + 17.3, y + 9.1, octaves, 2.05, 0.5);
+    const wy = fbm(x + 41.7, y + 23.5, octaves, 2.05, 0.5);
+    return { x: x + wx * strength, y: y + wy * strength };
+  }
+
+  /** Double domain warp — smoother, more natural macro shapes. */
+  function warp2Double(x, y, strength = 1) {
+    const q = warp2(x, y, strength * 0.55, 3);
+    return warp2(q.x, q.y, strength, 3);
+  }
+
+  return { noise2, fbm, ridgedFbm, billowFbm, warp2, warp2Double };
 }

@@ -1,10 +1,10 @@
 /**
- * Five open-world map themes. Each is fully explorable; multiplayer
- * uses the same maps with a tighter territory radius for netcode sanity.
+ * Five open-world map themes — each uses a distinct terrain profile (see terrainGen.js).
  */
 export const MAPS = [
   {
     id: 'meadow',
+    biome: 'temperate',
     name: { en: 'Green Meadows', fa: 'چمن‌زار سبز' },
     seed: 42,
     heightScale: 1,
@@ -14,7 +14,7 @@ export const MAPS = [
     waterShallow: 0x3ab0c9,
     skyTop: 0x3a9fd8,
     skyHorizon: 0xb8d4e8,
-    skyBottom: 0x7eb06a,
+    skyBottom: 0xb0cce0,
     sun: 0xfff2dd,
     hemiSky: 0xb8d4f0,
     hemiGround: 0x4a6a3a,
@@ -30,9 +30,11 @@ export const MAPS = [
     waterY: 0.2,
     worldBound: 400,
     mpTerritory: 220,
+    wind: { speed: 5, direction: 0.55, turbulence: 0.28 },
   },
   {
     id: 'desert',
+    biome: 'desert',
     name: { en: 'Sunscar Desert', fa: 'بیابان آفتاب‌سوخته' },
     seed: 91,
     heightScale: 0.75,
@@ -58,9 +60,11 @@ export const MAPS = [
     waterY: -1.5,
     worldBound: 400,
     mpTerritory: 200,
+    wind: { speed: 11, direction: 2.1, turbulence: 0.55 },
   },
   {
     id: 'arctic',
+    biome: 'alpine',
     name: { en: 'Frostbite Peaks', fa: 'قلّه‌های یخبندان' },
     seed: 17,
     heightScale: 1.35,
@@ -86,9 +90,11 @@ export const MAPS = [
     waterY: 0.5,
     worldBound: 400,
     mpTerritory: 210,
+    wind: { speed: 14, direction: 4.7, turbulence: 0.38 },
   },
   {
     id: 'islands',
+    biome: 'tropical',
     name: { en: 'Coral Archipelago', fa: ' مجمع‌الجزایر مرجانی' },
     seed: 55,
     heightScale: 0.55,
@@ -114,10 +120,11 @@ export const MAPS = [
     waterY: 1.2,
     worldBound: 400,
     mpTerritory: 230,
-    islandBias: true,
+    wind: { speed: 9, direction: 1.2, turbulence: 0.42 },
   },
   {
     id: 'volcanic',
+    biome: 'volcanic',
     name: { en: 'Ember Crater', fa: 'دهانه اخگر' },
     seed: 77,
     heightScale: 1.2,
@@ -144,11 +151,23 @@ export const MAPS = [
     worldBound: 380,
     mpTerritory: 190,
     lava: true,
+    wind: { speed: 7, direction: 5.5, turbulence: 0.72 },
   },
 ];
 
 export function getMap(id) {
   return MAPS.find((m) => m.id === id) || MAPS[0];
+}
+
+export function getMapWind(map, weather = 'clear') {
+  const base = map?.wind || { speed: 6, direction: 0, turbulence: 0.3 };
+  const wx =
+    weather === 'rain'
+      ? { speed: base.speed * 1.45, turbulence: base.turbulence * 1.35 }
+      : weather === 'snow'
+        ? { speed: base.speed * 0.75, turbulence: base.turbulence * 0.9 }
+        : { speed: base.speed, turbulence: base.turbulence };
+  return { ...base, ...wx };
 }
 
 export function mapLabel(map, lang = 'en') {

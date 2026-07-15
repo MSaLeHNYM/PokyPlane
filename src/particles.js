@@ -3,6 +3,7 @@
  * Typed-array updates only — no per-frame `new` allocations in hot paths.
  */
 import * as THREE from 'three';
+import { getQualityTier } from './quality.js';
 
 function makePoints(count, size, color, opts = {}) {
   const positions = new Float32Array(count * 3);
@@ -21,6 +22,7 @@ function makePoints(count, size, color, opts = {}) {
     transparent: true,
     opacity: opts.opacity ?? 0.85,
     depthWrite: false,
+    fog: false,
     blending: opts.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
     sizeAttenuation: true,
   });
@@ -51,16 +53,98 @@ function spawn(pool, x, y, z, vx, vy, vz, r, g, b, lifeSec) {
   pool.life[i] = lifeSec;
 }
 
+const _back = new THREE.Vector3();
+const _side = new THREE.Vector3();
+const _smokeHueColor = new THREE.Color();
+
+const EXPLOSION_PROFILES = {
+  mg: {
+    scale: 0.32,
+    debris: 14,
+    debrisSpd: [5, 14],
+    debrisLife: [0.12, 0.32],
+    debrisColor: () => ({
+      r: 0.98 + Math.random() * 0.02,
+      g: 0.88 + Math.random() * 0.1,
+      b: 0.35 + Math.random() * 0.2,
+    }),
+    sparks: 10,
+    sparkColor: [1, 0.96, 0.55],
+    smoke: 0,
+    ring: 8,
+    ringColor: [1, 0.9, 0.45],
+  },
+  cannon: {
+    scale: 0.62,
+    debris: 32,
+    debrisSpd: [9, 24],
+    debrisLife: [0.25, 0.55],
+    debrisColor: () => ({
+      r: 1,
+      g: 0.45 + Math.random() * 0.35,
+      b: 0.08 + Math.random() * 0.12,
+    }),
+    sparks: 18,
+    sparkColor: [1, 0.65, 0.18],
+    smoke: 10,
+    smokeColor: [0.14, 0.11, 0.09],
+    ring: 12,
+    ringColor: [1, 0.55, 0.12],
+  },
+  rocket: {
+    scale: 1.85,
+    debris: 230,
+    debrisSpd: [16, 52],
+    debrisLife: [0.6, 1.65],
+    debrisColor: () => ({
+      r: 1,
+      g: 0.28 + Math.random() * 0.45,
+      b: 0.02 + Math.random() * 0.12,
+    }),
+    sparks: 88,
+    sparkColor: [1, 0.78, 0.18],
+    smoke: 62,
+    smokeColor: [0.16, 0.1, 0.06],
+    ring: 46,
+    ringColor: [1, 0.45, 0.08],
+  },
+  missile: {
+    scale: 2.15,
+    spreadMul: 0.55,
+    debris: 2500,
+    debrisSpd: [18, 58],
+    debrisLife: [0.7, 1.85],
+    debrisColor: () => ({
+      r: 0.15 + Math.random() * 0.35,
+      g: 0.82 + Math.random() * 0.18,
+      b: 0.62 + Math.random() * 0.3,
+    }),
+    sparks: 1500,
+    sparkColor: [0.35, 1, 0.82],
+    smoke: 1000,
+    smokeColor: [0.06, 0.2, 0.16],
+    ring: 54,
+    ringSpread: 0.28,
+    ringVelMul: 0.2,
+    ringColor: [0.3, 0.95, 0.7],
+  },
+};
+
+function profileForWeapon(weapon) {
+  return EXPLOSION_PROFILES[weapon] || EXPLOSION_PROFILES.mg;
+}
+
 export class ParticleSystem {
   constructor(scene) {
     this.scene = scene;
     this.exhaust = makePoints(400, 0.35, 0xffffff, { opacity: 0.6 });
-    this.smoke = makePoints(500, 0.9, 0xffffff, { opacity: 0.5 });
+    this.smoke = makePoints(2400, 0.9, 0xffffff, { opacity: 0.5 });
     this.weather = makePoints(800, 0.25, 0xffffff, { opacity: 0.7 });
-    this.debris = makePoints(300, 0.4, 0xff8844, { additive: true, opacity: 0.95 });
-    this.sparkle = makePoints(200, 0.5, 0xffffff, { additive: true });
+    this.debris = makePoints(3200, 0.55, 0xff8844, { additive: true, opacity: 0.95 });
+    this.sparkle = makePoints(3400, 0.55, 0xffffff, { additive: true });
     this.speedLines = makePoints(120, 0.15, 0xffffff, { additive: true, opacity: 0.7 });
-    this.clouds = makePoints(180, 18, 0xffffff, { opacity: 0.35 });
+    this.clouds = makePoints(120, 14, 0xffffff, { opacity: 0.28 });
+    this._cloudOffsets = [];
 
     [
       this.exhaust,
@@ -79,20 +163,20 @@ export class ParticleSystem {
   }
 
   _seedClouds() {
-    // Soft volumetric clumps scattered across the sky
+    this._cloudOffsets = [];
     for (let i = 0; i < this.clouds.count; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const rad = 80 + Math.random() * 420;
-      const x = Math.cos(ang) * rad;
-      const z = Math.sin(ang) * rad;
-      const y = 45 + Math.random() * 80;
+      const rad = 120 + Math.random() * 520;
+      this._cloudOffsets.push({
+        ox: Math.cos(ang) * rad,
+        oz: Math.sin(ang) * rad,
+        y: 240 + Math.random() * 180,
+        drift: 0.6 + Math.random() * 1.4,
+      });
       const i3 = i * 3;
-      this.clouds.positions[i3] = x;
-      this.clouds.positions[i3 + 1] = y;
-      this.clouds.positions[i3 + 2] = z;
-      this.clouds.velocities[i3] = 1 + Math.random() * 2;
-      this.clouds.velocities[i3 + 1] = 0;
-      this.clouds.velocities[i3 + 2] = (Math.random() - 0.5) * 0.8;
+      this.clouds.positions[i3] = 0;
+      this.clouds.positions[i3 + 1] = this._cloudOffsets[i].y;
+      this.clouds.positions[i3 + 2] = 0;
       this.clouds.colors[i3] = 0.92;
       this.clouds.colors[i3 + 1] = 0.95;
       this.clouds.colors[i3 + 2] = 1;
@@ -103,24 +187,20 @@ export class ParticleSystem {
     this.clouds.points.geometry.attributes.color.needsUpdate = true;
   }
 
-  /** Keep soft cloud sprites near the player as they fly. */
+  /** Keep soft cloud sprites anchored to the player. */
   followClouds(camPos, dt) {
-    if (!camPos) return;
+    if (!camPos || !this._cloudOffsets?.length) return;
     const pos = this.clouds.positions;
-    const vel = this.clouds.velocities;
-    const wrap = 480;
+    const wrap = 620;
     for (let i = 0; i < this.clouds.count; i++) {
+      const c = this._cloudOffsets[i];
+      c.ox += c.drift * dt;
+      if (c.ox > wrap) c.ox -= wrap * 2;
+      if (c.ox < -wrap) c.ox += wrap * 2;
       const i3 = i * 3;
-      pos[i3] += vel[i3] * dt;
-      pos[i3 + 2] += vel[i3 + 2] * dt;
-      let dx = pos[i3] - camPos.x;
-      let dz = pos[i3 + 2] - camPos.z;
-      if (dx > wrap) pos[i3] -= wrap * 2;
-      if (dx < -wrap) pos[i3] += wrap * 2;
-      if (dz > wrap) pos[i3 + 2] -= wrap * 2;
-      if (dz < -wrap) pos[i3 + 2] += wrap * 2;
-      // Keep altitude band
-      if (pos[i3 + 1] < 40) pos[i3 + 1] = 45 + Math.random() * 70;
+      pos[i3] = camPos.x + c.ox;
+      pos[i3 + 1] = c.y;
+      pos[i3 + 2] = camPos.z + c.oz;
     }
     this.clouds.points.geometry.attributes.position.needsUpdate = true;
   }
@@ -153,16 +233,16 @@ export class ParticleSystem {
     if (speed < 28) return;
     const n = 1 + Math.floor(throttle * 2);
     const altFactor = THREE.MathUtils.clamp((altitude - 30) / 80, 0, 1);
+    _back.copy(vel).multiplyScalar(-1 / speed);
     for (let k = 0; k < n; k++) {
-      const back = vel.clone().multiplyScalar(-1 / speed);
       spawn(
         this.exhaust,
-        pos.x + back.x * 1.5 + (Math.random() - 0.5) * 0.3,
-        pos.y + back.y * 1.5 + (Math.random() - 0.5) * 0.2,
-        pos.z + back.z * 1.5 + (Math.random() - 0.5) * 0.3,
-        back.x * 2 + (Math.random() - 0.5),
-        back.y * 2 + 0.5 + Math.random(),
-        back.z * 2 + (Math.random() - 0.5),
+        pos.x + _back.x * 1.5 + (Math.random() - 0.5) * 0.3,
+        pos.y + _back.y * 1.5 + (Math.random() - 0.5) * 0.2,
+        pos.z + _back.z * 1.5 + (Math.random() - 0.5) * 0.3,
+        _back.x * 2 + (Math.random() - 0.5),
+        _back.y * 2 + 0.5 + Math.random(),
+        _back.z * 2 + (Math.random() - 0.5),
         0.3 + altFactor * 0.5,
         0.3 + altFactor * 0.5,
         0.32 + altFactor * 0.5,
@@ -178,20 +258,22 @@ export class ParticleSystem {
     let r, g, b;
     if (this.smokeColor === 'rainbow') {
       this._smokeHue = (this._smokeHue + 0.02) % 1;
-      const c = new THREE.Color().setHSL(this._smokeHue, 0.85, 0.55);
-      r = c.r; g = c.g; b = c.b;
+      _smokeHueColor.setHSL(this._smokeHue, 0.85, 0.55);
+      r = _smokeHueColor.r;
+      g = _smokeHueColor.g;
+      b = _smokeHueColor.b;
     } else {
       ({ r, g, b } = this.smokeColor);
     }
-    const back = vel.clone().multiplyScalar(-1 / speed);
+    _back.copy(vel).multiplyScalar(-1 / speed);
     spawn(
       this.smoke,
-      pos.x + back.x * 2,
-      pos.y + back.y * 2,
-      pos.z + back.z * 2,
-      back.x * 3 + (Math.random() - 0.5),
+      pos.x + _back.x * 2,
+      pos.y + _back.y * 2,
+      pos.z + _back.z * 2,
+      _back.x * 3 + (Math.random() - 0.5),
       1 + Math.random(),
-      back.z * 3 + (Math.random() - 0.5),
+      _back.z * 3 + (Math.random() - 0.5),
       r, g, b,
       2.5
     );
@@ -217,18 +299,106 @@ export class ParticleSystem {
   }
 
   burstExplosion(pos, count = 80) {
-    for (let i = 0; i < count; i++) {
+    this.emitImpactExplosion(pos, { weapon: 'cannon', scale: count / 80 });
+  }
+
+  /** Per-weapon impact burst — mg/cannon small, rocket orange, missile green. */
+  emitImpactExplosion(pos, opts = {}) {
+    const weapon = opts.weapon || 'mg';
+    const prof = profileForWeapon(weapon);
+    const scaleMul = opts.scale ?? 1;
+    const scale = prof.scale * scaleMul;
+    const spread = prof.spreadMul ?? 1;
+    const px = pos.x;
+    const py = pos.y;
+    const pz = pos.z;
+
+    const debrisN = Math.floor(prof.debris * scaleMul);
+    const [dLo, dHi] = prof.debrisSpd;
+    const [lifeLo, lifeHi] = prof.debrisLife;
+
+    for (let i = 0; i < debrisN; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.random() * Math.PI;
-      const sp = 8 + Math.random() * 28;
+      const sp = (dLo + Math.random() * (dHi - dLo)) * scale * spread;
+      const { r, g, b } = prof.debrisColor();
       spawn(
         this.debris,
-        pos.x, pos.y, pos.z,
+        px,
+        py,
+        pz,
         Math.sin(phi) * Math.cos(theta) * sp,
-        Math.cos(phi) * sp * 0.8 + 5,
+        Math.abs(Math.cos(phi)) * sp * 0.85 + (4 * scale + Math.random() * 6 * scale) * spread,
         Math.sin(phi) * Math.sin(theta) * sp,
-        1, 0.4 + Math.random() * 0.4, 0.1,
-        0.6 + Math.random() * 1.2
+        r,
+        g,
+        b,
+        lifeLo + Math.random() * (lifeHi - lifeLo)
+      );
+    }
+
+    const [sr, sg, sb] = prof.sparkColor;
+    const sparkN = Math.floor(prof.sparks * scaleMul);
+    for (let i = 0; i < sparkN; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const sp = (4 + Math.random() * 18) * scale * spread;
+      spawn(
+        this.sparkle,
+        px + (Math.random() - 0.5) * scale * 2 * spread,
+        py + (Math.random() - 0.5) * scale * spread,
+        pz + (Math.random() - 0.5) * scale * 2 * spread,
+        Math.cos(theta) * sp,
+        (3 + Math.random() * 14 * scale) * spread,
+        Math.sin(theta) * sp,
+        sr,
+        sg,
+        sb,
+        0.15 + Math.random() * 0.35 * scale
+      );
+    }
+
+    if (prof.smoke > 0) {
+      const [smR, smG, smB] = prof.smokeColor || [0.12, 0.11, 0.1];
+      const smokeN = Math.floor(prof.smoke * scaleMul);
+      for (let i = 0; i < smokeN; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const sp = (2 + Math.random() * 6) * scale * spread;
+        spawn(
+          this.smoke,
+          px + (Math.random() - 0.5) * scale * 2.5 * spread,
+          py + 0.4 + Math.random() * scale * spread,
+          pz + (Math.random() - 0.5) * scale * 2.5 * spread,
+          Math.cos(theta) * sp,
+          (2 + Math.random() * 8 * scale) * spread,
+          Math.sin(theta) * sp,
+          smR + Math.random() * 0.04,
+          smG + Math.random() * 0.03,
+          smB + Math.random() * 0.03,
+          1.2 + Math.random() * 2 * scale
+        );
+      }
+    }
+
+    const [rr, rg, rb] = prof.ringColor || prof.sparkColor;
+    const ringN = Math.floor(prof.ring * scaleMul);
+    const ringSpread = prof.ringSpread ?? 1;
+    const ringVelMul = prof.ringVelMul ?? 1;
+    for (let i = 0; i < ringN; i++) {
+      const a = (i / Math.max(1, ringN)) * Math.PI * 2 + Math.random() * 0.35;
+      const rad = (1 + Math.random() * 3.5) * scale * ringSpread;
+      const ringVel = (4 + 3 * scale) * ringVelMul;
+      spawn(
+        this.sparkle,
+        px + Math.cos(a) * rad,
+        py + 0.15,
+        pz + Math.sin(a) * rad,
+        Math.cos(a) * ringVel,
+        (1.5 + Math.random() * 3 * scale) * ringVelMul,
+        Math.sin(a) * ringVel,
+        rr,
+        rg,
+        rb,
+        0.2 + Math.random() * 0.25 * scale
       );
     }
   }
@@ -255,12 +425,11 @@ export class ParticleSystem {
     for (let k = 0; k < 2; k++) {
       const ox = (Math.random() - 0.5) * 8;
       const oy = (Math.random() - 0.5) * 5;
-      const side = new THREE.Vector3(ox, oy, 0);
       spawn(
         this.speedLines,
-        pos.x + side.x,
-        pos.y + side.y,
-        pos.z + side.z,
+        pos.x + ox,
+        pos.y + oy,
+        pos.z,
         -forward.x * 40,
         -forward.y * 40,
         -forward.z * 40,
@@ -316,11 +485,11 @@ export class ParticleSystem {
   }
 
   setQuality(level) {
-    const sizes = { low: 0.5, medium: 1, high: 1 };
-    const s = sizes[level] ?? 1;
+    const tier = getQualityTier(level);
+    const s = tier.particleScale;
     this.exhaust.points.material.size = 0.35 * s;
     this.smoke.points.material.size = 0.9 * s;
-    this.clouds.points.material.size = level === 'low' ? 12 : 18;
-    this.weather.points.visible = level !== 'low';
+    this.clouds.points.material.size = tier.cloudPointSize;
+    this.weather.points.visible = tier.id !== 'low';
   }
 }

@@ -1,0 +1,244 @@
+@import url('/shared/ui-theme.css');
+
+:root {
+  --sky: #5eb8e8;
+  --sky-deep: #1a6aa8;
+  --accent: #ff6b4a;
+  --accent-2: #ffd166;
+  --panel: rgba(18, 42, 68, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.18);
+  --text: #f4f8fc;
+  --muted: #a8c4d8;
+  --font-ui: system-ui, "Nunito", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  background: #0a1a2a;
+  color: var(--text);
+}
+
+.hidden { display: none !important; }
+
+.screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  padding: 2rem;
+  border-radius: 16px;
+  width: min(400px, 92vw);
+}
+
+.card label {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.card input,
+.card select {
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.card select {
+  padding-right: 2.1rem;
+}
+
+.card button,
+.topbar button,
+.refresh,
+.inline-form button,
+.tab {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+  font-family: var(--font-ui);
+  transition: filter 0.15s, transform 0.1s;
+}
+
+.card button:hover,
+.topbar button:hover,
+.refresh:hover,
+.inline-form button:hover {
+  filter: brightness(1.08);
+}
+
+.error { color: #f87171; font-size: 0.9rem; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+}
+
+.stat-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.stat-card strong {
+  display: block;
+  font-size: 1.8rem;
+  color: var(--sky);
+}
+
+.tabs {
+  padding: 0 1.5rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.tab { background: var(--control-bg, #123048); }
+.tab.active { background: var(--accent); }
+
+main {
+  padding: 1rem 1.5rem 2rem;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+th, td {
+  padding: 0.55rem 0.4rem;
+  border-bottom: 1px solid var(--panel-border);
+  text-align: left;
+}
+
+.toolbar,
+.inline-form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  align-items: center;
+}
+
+.inline-form input,
+.inline-form select,
+.toolbar input,
+.toolbar select {
+  padding: 0.5rem 0.7rem;
+  min-width: 120px;
+}
+
+.inline-form select,
+.toolbar select {
+  padding-right: 2.1rem;
+}
+
+.btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  margin-right: 0.25rem;
+  font-weight: 700;
+}
+
+.btn-danger { background: #dc2626; color: #fff; }
+.btn-warn { background: #d97706; color: #fff; }
+.btn-ok { background: #059669; color: #fff; }
+
+.badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: var(--control-bg, #123048);
+}
+
+.badge.banned { background: #7f1d1d; }
+.badge.admin { background: #1a4a7a; }
+
+.pane-desc {
+  color: var(--muted);
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+.announce-form {
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.announce-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.announce-form textarea {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: var(--control-bg, #123048);
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.check-row {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  font-weight: 600 !important;
+}
+
+.check-row input {
+  width: auto;
+  margin: 0;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.status-msg.ok { color: #4ade80; font-size: 0.88rem; font-weight: 700; }
+.status-msg.error { color: #f87171; font-size: 0.88rem; font-weight: 700; }
+
+.muted-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+}

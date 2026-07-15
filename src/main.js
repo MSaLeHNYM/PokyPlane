@@ -2,7 +2,7 @@
  * PokyPlane — main entry: scene, i18n, settings, matchmaking, loop.
  */
 import * as THREE from 'three';
-import { createPlane, updatePlaneVisuals } from './plane.js';
+import { createPlane, updatePlaneVisuals, applyPlaneStats, PLANE_TYPES, getPlaneType, getPlaneHitRadius } from './plane.js';
 import { SoundEngine } from './sound.js';
 import { ParticleSystem } from './particles.js';
 import { World } from './terrain.js';
@@ -18,31 +18,48 @@ import {
   applyGraphics,
   difficultyMods,
   DEFAULT_SETTINGS,
+  clampSetting,
+  snapViewDistanceKm,
 } from './settings.js';
 import { Matchmaking, getRoomFromUrl, clearRoomFromUrl } from './matchmaking.js';
-import { WeaponSystem, WEAPON_ORDER, WEAPON_DEFS, DEFAULT_WEAPON_FLAGS } from './weapons.js';
+import { WeaponSystem, WEAPON_ORDER, WEAPON_DEFS, DEFAULT_WEAPON_FLAGS, isExplosiveWeapon } from './weapons.js';
 import { FuelPickups } from './fuel.js';
-import { MAPS, getMap, mapLabel } from './maps.js';
+import { setupAuthUI, isLoggedIn } from './authUi.js';
+import { fetchAnnouncement } from './api.js';
+import { submitScore } from './api.js';
+import { startPresenceLoop, stopPresenceLoop } from './presence.js';
+import { MAPS, getMap, getMapWind, mapLabel } from './maps.js';
+import { pickSpawnAirport, runwaySpawnPose } from './airports.js';
+import {
+  DEFAULT_KEY_BINDINGS,
+  cloneKeyBindings,
+  formatBinding,
+  normalizeKeyBindings,
+} from './keybindings.js';
+import { TargetLockSystem, buildThreatMarkers, findAimAssistTarget } from './targeting.js';
+import { normalizeQuality } from './quality.js';
 
 // ----- Settings & audio -----
 let settings = loadSettings();
 
 const canvas = document.getElementById('game-canvas');
+const launchMax = normalizeQuality(settings.quality) === 'max';
 const renderer = new THREE.WebGLRenderer({
   canvas,
-  antialias: settings.antialias,
-  powerPreference: 'high-performance',
+  antialias: launchMax,
+  powerPreference: launchMax ? 'high-performance' : 'low-power',
+  failIfMajorPerformanceCaveat: false,
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, settings.pixelRatio));
+renderer.setPixelRatio(1);
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = settings.shadows;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = false;
+renderer.shadowMap.type = THREE.BasicShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.toneMappingExposure = 1;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 900);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2500);
 
 const sound = new SoundEngine();
 const match = new Matchmaking();
@@ -56,10 +73,64 @@ let mpLobby = {
   mapId: selectedMapId,
   mode: 'dogfight',
   difficulty: 'normal',
+  maxPlayers: 2,
   weapons: true,
   weaponFlags: { ...DEFAULT_WEAPON_FLAGS },
   fuelLimit: false,
+  weatherCycle: true,
+  dayNight: true,
+  airportSpawnChance: 5,
+  enabledPlanes: PLANE_TYPES.map(() => true),
+  spawnAirportId: 'main',
 };
+
+function defaultEnabledPlanes() {
+  return PLANE_TYPES.map(() => true);
+}
+
+function clampAirportChance(v) {
+  return clampSetting(v, 0, 100, 5);
+}
+
+function clampViewDistanceKm(v) {
+  return snapViewDistanceKm(Number(v));
+}
+
+function clampMaxPlayers(v) {
+  return Math.round(clampSetting(v, 2, 8, 2));
+}
+
+function resolveSpawn(world, opts = {}) {
+  const role = opts.role || 'host';
+  const chance = clampAirportChance(opts.randomChance ?? settings.airportSpawnChance ?? 5);
+  let ap = opts.airportId ? world.airports.find((a) => a.id === opts.airportId) : null;
+  if (!ap) {
+    ap = pickSpawnAirport(world.airports, chance);
+  }
+  const pose = runwaySpawnPose(ap, role);
+  const y = world.getHeight(pose.x, pose.z);
+  return {
+    x: pose.x,
+    z: pose.z,
+    y,
+    heading: pose.heading,
+    pitch: 0,
+    roll: 0,
+    airport: ap,
+    random: !ap.primary,
+    airportId: ap.id,
+  };
+}
+
+function firstEnabledPlaneIndex(enabled = defaultEnabledPlanes()) {
+  const idx = enabled.findIndex(Boolean);
+  return idx >= 0 ? idx : 0;
+}
+
+function normalizePlaneForLobby(idx, enabled = defaultEnabledPlanes()) {
+  if (enabled[idx]) return idx;
+  return firstEnabledPlaneIndex(enabled);
+}
 
 let world = null;
 let particles = null;
@@ -77,12 +148,21 @@ let remoteInterp = {
   targetQuat: new THREE.Quaternion(),
   health: 100,
   throttle: 0.5,
-  skin: 1,
+  skin: 0,
 };
+
+const _aimOrigin = new THREE.Vector3();
+const _aimDir = new THREE.Vector3();
+const _aimWorld = new THREE.Vector3();
+const _aimProj = new THREE.Vector3();
+const targetLock = new TargetLockSystem();
+let _prevLockId = null;
 
 let state = 'menu';
 let gameMode = 'freeroam';
-let skinIndex = 1;
+let planeTypeIndex = Number(localStorage.getItem('pokyplane_plane') || 0);
+/** @deprecated alias for multiplayer sync */
+let skinIndex = planeTypeIndex;
 let weather = 'clear';
 let weatherTimer = 0;
 let race = null;
@@ -93,6 +173,8 @@ let flightTime = 0;
 let settingsView = 'simple';
 let settingsTab = 'graphics';
 let bannerDismissed = sessionStorage.getItem('pokyplane_banner_dismissed') === '1';
+/** Server-managed banner; null = use local settings fallback. */
+let serverAnnouncement = null;
 let fpsAccum = 0;
 let fpsFrames = 0;
 let fpsValue = 60;
@@ -109,6 +191,12 @@ const fpsEl = document.getElementById('fps-counter');
 const announceEl = document.getElementById('announce-banner');
 const announceText = document.getElementById('announce-text');
 
+function syncWorldVisibility() {
+  if (!world?.group) return;
+  world.group.visible = state === 'playing' || state === 'paused';
+  input.setGameActive(state === 'playing' || state === 'paused');
+}
+
 function showScreen(id) {
   [menuEl, optionsEl, pauseEl, resultsEl, mpEl].forEach((el) => el?.classList.add('hidden'));
   if (id === 'menu') menuEl?.classList.remove('hidden');
@@ -116,6 +204,7 @@ function showScreen(id) {
   if (id === 'pause') pauseEl?.classList.remove('hidden');
   if (id === 'results') resultsEl?.classList.remove('hidden');
   if (id === 'multiplayer') mpEl?.classList.remove('hidden');
+  syncWorldVisibility();
 }
 
 async function unlockAudio() {
@@ -131,11 +220,25 @@ async function unlockAudio() {
 
 function updateBanner() {
   if (!announceEl) return;
-  const on = settings.announcementEnabled && !bannerDismissed;
-  announceEl.classList.toggle('hidden', !on);
+  const src = serverAnnouncement ?? {
+    enabled: settings.announcementEnabled,
+    en: settings.announcement?.en || '',
+    fa: settings.announcement?.fa || '',
+  };
   const lang = getLang();
-  announceText.textContent =
-    settings.announcement?.[lang] || settings.announcement?.en || '';
+  const text = src[lang] || src.en || src.fa || '';
+  const on = !!src.enabled && !bannerDismissed && !!text.trim();
+  announceEl.classList.toggle('hidden', !on);
+  announceText.textContent = text;
+}
+
+async function loadServerAnnouncement() {
+  try {
+    serverAnnouncement = await fetchAnnouncement();
+  } catch {
+    serverAnnouncement = null;
+  }
+  updateBanner();
 }
 
 function syncLangButtons() {
@@ -146,12 +249,18 @@ function syncLangButtons() {
 
 function buildMenuPlane() {
   if (menuPlane) scene.remove(menuPlane);
-  const built = createPlane(skinIndex);
+  const built = createPlane(planeTypeIndex);
   menuPlane = built.group;
   menuParts = built.parts;
   menuPlane.position.set(0, 2, 0);
   menuPlane.scale.setScalar(1.2);
   scene.add(menuPlane);
+}
+
+function destroyWorld() {
+  world?.disableStreaming?.();
+  world?.dispose?.();
+  world = null;
 }
 
 function ensureWorld(mapId = selectedMapId) {
@@ -168,12 +277,8 @@ function ensureWorld(mapId = selectedMapId) {
 }
 
 function applySettingsEffects() {
-  applyGraphics(settings, { renderer, world, particles, scene });
-  if (world && !settings.fog) {
-    scene.fog = null;
-  } else if (world && settings.fog && !scene.fog) {
-    scene.fog = new THREE.FogExp2(0x87b8d8, 0.0018);
-  }
+  applyGraphics(settings, { renderer, world, particles, scene, camera });
+  input.setKeyBindings(settings.keyBindings);
   particles?.setSmoke(settings.smoke);
   sound.setMix({
     master: settings.masterVolume,
@@ -186,22 +291,36 @@ function applySettingsEffects() {
   fpsEl?.classList.toggle('hidden', !settings.showFps);
   const mods = difficultyMods(settings.difficulty);
   if (flight) {
-    flight.stallSpeed = settings.stallAssist ? mods.stallSpeed - 4 : mods.stallSpeed;
-    // Mild sensitivity from settings (default lower for easy fun)
     const sens = 0.65 + (settings.mouseSens || 1) * 0.35;
-    flight.pitchRate = 1.2 * sens;
-    flight.turnRate = 1.35 * sens;
-    flight.rollRate = 1.4 * sens;
+    applyPlaneStats(flight, planeTypeIndex, sens, {
+      stallAssist: settings.stallAssist,
+      stallMod: mods.stallSpeed,
+    });
   }
   updateBanner();
+  syncShadowCasters();
+}
+
+function syncShadowCasters() {
+  const wantShadows = !!settings.shadows;
+  world?.setShadowsEnabled?.(wantShadows);
+  if (planeGroup) {
+    planeGroup.traverse((o) => {
+      if (o.isMesh) {
+        o.castShadow = wantShadows;
+        o.receiveShadow = wantShadows;
+      }
+    });
+  }
 }
 
 function spawnPlayerPlane() {
   if (planeGroup) scene.remove(planeGroup);
-  const built = createPlane(skinIndex);
+  const built = createPlane(planeTypeIndex);
   planeGroup = built.group;
   planeParts = built.parts;
   scene.add(planeGroup);
+  syncShadowCasters();
 }
 
 function spawnRemotePlane(skin = 1) {
@@ -227,11 +346,14 @@ function clearModes() {
   combat?.dispose();
   combat = null;
   fuelDrops?.clear();
+  targetLock.clear();
+  _prevLockId = null;
 }
 
 function startGame(mode, mapOverride = null) {
   const mapId = mapOverride || selectedMapId || document.getElementById('menu-map')?.value || 'meadow';
   ensureWorld(mapId);
+  world?.setTimeOfDay(0.22);
   clearModes();
   weapons?.clear();
   gameMode = mode;
@@ -250,11 +372,17 @@ function startGame(mode, mapOverride = null) {
   const mods = difficultyMods(
     mode === 'multiplayer' ? mpLobby.difficulty : settings.difficulty
   );
-  flight.stallSpeed = settings.stallAssist ? mods.stallSpeed - 4 : mods.stallSpeed;
+  const enabledPlanes =
+    mode === 'multiplayer' ? mpLobby.enabledPlanes || defaultEnabledPlanes() : defaultEnabledPlanes();
+  planeTypeIndex = normalizePlaneForLobby(planeTypeIndex, enabledPlanes);
+  skinIndex = planeTypeIndex;
+  localStorage.setItem('pokyplane_plane', String(planeTypeIndex));
+
   const sens = 0.65 + (settings.mouseSens || 0.75) * 0.35;
-  flight.pitchRate = 1.2 * sens;
-  flight.turnRate = 1.35 * sens;
-  flight.rollRate = 1.4 * sens;
+  applyPlaneStats(flight, planeTypeIndex, sens, {
+    stallAssist: settings.stallAssist,
+    stallMod: mods.stallSpeed,
+  });
 
   const useFuel =
     mode === 'multiplayer' ? !!mpLobby.fuelLimit : !!settings.fuelLimit;
@@ -265,11 +393,35 @@ function startGame(mode, mapOverride = null) {
   flight.fuelMax = 100;
   flight.fuel = useFuel ? mods.startFuel ?? 100 : 100;
 
-  const spawnZ = mode === 'multiplayer' && match.role === 'guest' ? 40 : 30;
-  const spawnX = mode === 'multiplayer' && match.role === 'guest' ? 30 : 0;
-  const groundY = world.getHeight(spawnX, spawnZ);
-  flight.reset({ x: spawnX, y: groundY + 1.4, z: spawnZ });
+  const spawnRole = mode === 'multiplayer' && match.role === 'guest' ? 'guest' : 'host';
+  const spawnChance =
+    mode === 'multiplayer' ? mpLobby.airportSpawnChance : settings.airportSpawnChance;
+  const spawnInfo = resolveSpawn(world, {
+    role: spawnRole,
+    randomChance: spawnChance,
+    airportId: mode === 'multiplayer' ? mpLobby.spawnAirportId : undefined,
+  });
+  if (mode === 'multiplayer' && match.role === 'host' && !mpLobby.spawnAirportId) {
+    mpLobby.spawnAirportId = spawnInfo.airportId;
+  }
+
+  world?.enableStreaming?.(spawnInfo.x, spawnInfo.z);
+
+  flight.reset({
+    x: spawnInfo.x,
+    y: spawnInfo.y + flight.gearHeight,
+    z: spawnInfo.z,
+    heading: spawnInfo.heading,
+    pitch: spawnInfo.pitch,
+    roll: spawnInfo.roll,
+  });
   if (useFuel) flight.fuel = mods.startFuel ?? 100;
+
+  if (spawnInfo.random) {
+    const lang = getLang();
+    const name = spawnInfo.airport?.name?.[lang] || spawnInfo.airport?.name?.en || t('airport');
+    hud.toast(`${t('spawnedAtAirport')}: ${name}`);
+  }
 
   if (!fuelDrops) fuelDrops = new FuelPickups(scene);
   fuelDrops.setEnabled(useFuel, diffKey);
@@ -286,11 +438,18 @@ function startGame(mode, mapOverride = null) {
   }
 
   showScreen('none');
+  syncWorldVisibility();
   hud.show(true);
   sound.stopAmbient();
   sound.startEngine();
   sound.startWind();
   particles.setSmoke(settings.smoke);
+
+  startPresenceLoop(() => ({
+    status: 'playing',
+    gameMode,
+    mapId: world?.mapId,
+  }));
 
   // Weapon loadout — all 4 in solo; host flags in MP
   if (weapons) {
@@ -308,19 +467,37 @@ function startGame(mode, mapOverride = null) {
     hud.toast(t('raceToast'));
   } else if (mode === 'combat') {
     combat = new CombatWave(scene, createPlane);
-    combat.spawnWave();
     hud.toast(t('combatToast'));
   } else if (mode === 'multiplayer') {
     hud.toast(t('mpToast'));
   } else {
-    hud.toast(`${t('freeRoamToast')} · A/D=turn · Shift=speed · S=takeoff`);
+    hud.toast(`${t('freeRoamToast')} · A/D=turn · Shift=speed · X=slow · S=takeoff`);
   }
 }
 
 function endGame(title, body) {
   state = 'results';
+  world?.disableStreaming?.();
   sound.setStall(false);
   sound.stopEngine();
+  stopPresenceLoop();
+
+  const scoreVal =
+    gameMode === 'race' && race
+      ? race.score
+      : gameMode === 'combat' && combat
+        ? combat.score
+        : Math.floor(flightTime);
+
+  if (isLoggedIn()) {
+    submitScore({
+      mode: gameMode,
+      score: scoreVal,
+      mapId: world?.mapId,
+      flightTimeSec: flightTime,
+    }).catch(() => {});
+  }
+
   document.getElementById('results-title').textContent = title;
   document.getElementById('results-body').textContent = body;
   showScreen('results');
@@ -329,6 +506,8 @@ function endGame(title, body) {
 
 function quitToMenu() {
   state = 'menu';
+  world?.disableStreaming?.();
+  stopPresenceLoop();
   clearModes();
   clearRemotePlane();
   sound.stopEngine();
@@ -363,7 +542,7 @@ function fillSettingsForm() {
     'set-difficulty-simple': settings.difficulty,
     'set-smoke-simple': settings.smoke,
     'set-showfps-simple': settings.showFps,
-    'set-chunkdist-simple': String(settings.chunkDistance ?? 4),
+    'set-viewdist-simple': String(settings.viewDistanceKm ?? 1),
     'set-quality': settings.quality,
     'set-fpscap': String(settings.fpsCap),
     'set-pixelratio': settings.pixelRatio,
@@ -372,7 +551,7 @@ function fillSettingsForm() {
     'set-antialias': settings.antialias,
     'set-particles': settings.particles,
     'set-fog': settings.fog,
-    'set-chunkdist': String(settings.chunkDistance ?? 4),
+    'set-viewdist': String(settings.viewDistanceKm ?? 1),
     'set-master': Math.round(settings.masterVolume * 100),
     'set-engine': Math.round(settings.engineVolume * 100),
     'set-wind': Math.round(settings.windVolume * 100),
@@ -390,6 +569,7 @@ function fillSettingsForm() {
     'set-daynight': settings.dayNight,
     'set-fuellimit': settings.fuelLimit,
     'set-fuellimit-simple': settings.fuelLimit,
+    'set-airport-spawn': settings.airportSpawnChance ?? 5,
     'set-language': settings.language,
     'set-announce-on': settings.announcementEnabled,
   };
@@ -403,6 +583,60 @@ function fillSettingsForm() {
   const fa = document.getElementById('set-announce-fa');
   if (en) en.value = settings.announcement?.en || '';
   if (fa) fa.value = settings.announcement?.fa || '';
+  refreshKeybindButtons();
+}
+
+function refreshKeybindButtons() {
+  const bindings = normalizeKeyBindings(settings.keyBindings);
+  document.querySelectorAll('.keybind-btn').forEach((btn) => {
+    const action = btn.dataset.bind;
+    if (!action) return;
+    btn.textContent = formatBinding(bindings[action]);
+    btn.classList.remove('listening');
+  });
+}
+
+let keyCapture = null;
+
+function setupKeybindUI() {
+  document.querySelectorAll('.keybind-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (keyCapture?.btn) {
+        keyCapture.btn.classList.remove('listening');
+        refreshKeybindButtons();
+      }
+      keyCapture = { action: btn.dataset.bind, btn };
+      btn.classList.add('listening');
+      btn.textContent = t('keyPressPrompt');
+    });
+  });
+
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (!keyCapture) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.code === 'Escape') {
+        keyCapture.btn.classList.remove('listening');
+        refreshKeybindButtons();
+        keyCapture = null;
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) {
+        hud.toast(t('keyNoModifiers'));
+        return;
+      }
+      if (e.code === 'Tab') return;
+      if (!settings.keyBindings) settings.keyBindings = cloneKeyBindings(DEFAULT_KEY_BINDINGS);
+      settings.keyBindings[keyCapture.action] = [e.code];
+      input.setKeyBindings(settings.keyBindings);
+      keyCapture.btn.textContent = formatBinding([e.code]);
+      keyCapture.btn.classList.remove('listening');
+      keyCapture = null;
+    },
+    true
+  );
 }
 
 function readSettingsForm() {
@@ -426,7 +660,7 @@ function readSettingsForm() {
     settings.difficulty = str('set-difficulty-simple', settings.difficulty);
     settings.smoke = str('set-smoke-simple', settings.smoke);
     settings.showFps = chk('set-showfps-simple', settings.showFps);
-    settings.chunkDistance = num('set-chunkdist-simple', settings.chunkDistance ?? 4);
+    settings.viewDistanceKm = clampViewDistanceKm(str('set-viewdist-simple', settings.viewDistanceKm ?? 1));
     settings.fuelLimit = chk('set-fuellimit-simple', settings.fuelLimit);
   } else {
     settings.quality = str('set-quality', settings.quality);
@@ -437,7 +671,7 @@ function readSettingsForm() {
     settings.antialias = chk('set-antialias', settings.antialias);
     settings.particles = chk('set-particles', settings.particles);
     settings.fog = chk('set-fog', settings.fog);
-    settings.chunkDistance = num('set-chunkdist', settings.chunkDistance ?? 4);
+    settings.viewDistanceKm = clampViewDistanceKm(str('set-viewdist', settings.viewDistanceKm ?? 1));
     settings.masterVolume = num('set-master', 70) / 100;
     settings.engineVolume = num('set-engine', 100) / 100;
     settings.windVolume = num('set-wind', 100) / 100;
@@ -454,6 +688,7 @@ function readSettingsForm() {
     settings.weatherCycle = chk('set-weather', true);
     settings.dayNight = chk('set-daynight', true);
     settings.fuelLimit = chk('set-fuellimit', false);
+    settings.airportSpawnChance = clampAirportChance(num('set-airport-spawn', settings.airportSpawnChance ?? 5));
     settings.language = str('set-language', settings.language);
     settings.announcementEnabled = chk('set-announce-on', true);
     settings.announcement = {
@@ -497,6 +732,75 @@ function applyAndSaveSettings() {
   applySettingsEffects();
   fillSettingsForm();
   hud.toast(t('saved'));
+}
+
+// ----- Host modal -----
+function fillHostModal() {
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+  };
+  const setChk = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!val;
+  };
+
+  setVal('mp-map', mpLobby.mapId || selectedMapId);
+  setVal('mp-mode', mpLobby.mode || 'dogfight');
+  setVal('mp-difficulty', mpLobby.difficulty || 'normal');
+  setVal('mp-max-players', mpLobby.maxPlayers ?? 2);
+  setVal('mp-airport-spawn', mpLobby.airportSpawnChance ?? 5);
+  setChk('mp-fuel-limit', mpLobby.fuelLimit);
+  setChk('mp-weather', mpLobby.weatherCycle !== false);
+  setChk('mp-daynight', mpLobby.dayNight !== false);
+  setChk('mp-wpn-mg', mpLobby.weaponFlags?.mg !== false);
+  setChk('mp-wpn-cannon', mpLobby.weaponFlags?.cannon !== false);
+  setChk('mp-wpn-rocket', mpLobby.weaponFlags?.rocket !== false);
+  setChk('mp-wpn-missile', mpLobby.weaponFlags?.missile !== false);
+
+  const enabled = mpLobby.enabledPlanes || defaultEnabledPlanes();
+  document.querySelectorAll('[data-mp-plane]').forEach((el) => {
+    const i = Number(el.dataset.mpPlane);
+    el.checked = enabled[i] !== false;
+  });
+}
+
+function readHostModal() {
+  const flags = {
+    mg: document.getElementById('mp-wpn-mg')?.checked !== false,
+    cannon: document.getElementById('mp-wpn-cannon')?.checked !== false,
+    rocket: document.getElementById('mp-wpn-rocket')?.checked !== false,
+    missile: document.getElementById('mp-wpn-missile')?.checked !== false,
+  };
+  const enabledPlanes = defaultEnabledPlanes();
+  document.querySelectorAll('[data-mp-plane]').forEach((el) => {
+    const i = Number(el.dataset.mpPlane);
+    if (i >= 0 && i < enabledPlanes.length) enabledPlanes[i] = el.checked;
+  });
+  if (!enabledPlanes.some(Boolean)) enabledPlanes[0] = true;
+
+  return {
+    mapId: document.getElementById('mp-map')?.value || selectedMapId,
+    mode: document.getElementById('mp-mode')?.value || 'dogfight',
+    difficulty: document.getElementById('mp-difficulty')?.value || 'normal',
+    maxPlayers: clampMaxPlayers(document.getElementById('mp-max-players')?.value),
+    airportSpawnChance: clampAirportChance(document.getElementById('mp-airport-spawn')?.value),
+    fuelLimit: document.getElementById('mp-fuel-limit')?.checked === true,
+    weatherCycle: document.getElementById('mp-weather')?.checked !== false,
+    dayNight: document.getElementById('mp-daynight')?.checked !== false,
+    weapons: WEAPON_ORDER.some((id) => flags[id]),
+    weaponFlags: flags,
+    enabledPlanes,
+  };
+}
+
+function openHostModal() {
+  fillHostModal();
+  document.getElementById('mp-host-modal')?.classList.remove('hidden');
+}
+
+function closeHostModal() {
+  document.getElementById('mp-host-modal')?.classList.add('hidden');
 }
 
 // ----- Matchmaking UI -----
@@ -543,6 +847,13 @@ match.onEvent = (ev) => {
       ...mpLobby,
       ...ev.config,
       weaponFlags: { ...DEFAULT_WEAPON_FLAGS, ...(ev.config?.weaponFlags || {}) },
+      enabledPlanes: ev.config?.enabledPlanes?.length
+        ? ev.config.enabledPlanes
+        : mpLobby.enabledPlanes,
+      airportSpawnChance: clampAirportChance(
+        ev.config?.airportSpawnChance ?? mpLobby.airportSpawnChance
+      ),
+      maxPlayers: clampMaxPlayers(ev.config?.maxPlayers ?? mpLobby.maxPlayers),
     };
     weapons?.setEnabled(mpLobby.weaponFlags);
     if (match.role === 'guest' && state !== 'playing') {
@@ -556,6 +867,12 @@ match.onEvent = (ev) => {
     hud.toast(t('peerJoined'));
     sound.playUI('success');
     if (match.role === 'host') {
+      ensureWorld(mpLobby.mapId);
+      const pre = resolveSpawn(world, {
+        role: 'host',
+        randomChance: mpLobby.airportSpawnChance,
+      });
+      mpLobby.spawnAirportId = pre.airportId;
       match.sendEvent({ type: 'lobby', config: { ...mpLobby } });
       startGame('multiplayer', mpLobby.mapId);
     }
@@ -586,21 +903,8 @@ match.onEvent = (ev) => {
 
 async function hostMatch() {
   await unlockAudio();
-  const flags = {
-    mg: document.getElementById('mp-wpn-mg')?.checked !== false,
-    cannon: document.getElementById('mp-wpn-cannon')?.checked !== false,
-    rocket: document.getElementById('mp-wpn-rocket')?.checked !== false,
-    missile: document.getElementById('mp-wpn-missile')?.checked !== false,
-  };
-  const anyOn = WEAPON_ORDER.some((id) => flags[id]);
-  mpLobby = {
-    mapId: document.getElementById('mp-map')?.value || selectedMapId,
-    mode: document.getElementById('mp-mode')?.value || 'dogfight',
-    difficulty: document.getElementById('mp-difficulty')?.value || 'normal',
-    weapons: anyOn,
-    weaponFlags: flags,
-    fuelLimit: document.getElementById('mp-fuel-limit')?.checked === true,
-  };
+  mpLobby = { ...mpLobby, ...readHostModal() };
+  closeHostModal();
   try {
     const { inviteUrl, roomId } = await match.host();
     document.getElementById('mp-host-box')?.classList.remove('hidden');
@@ -647,6 +951,8 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
     if (action === 'start-combat') startGame('combat');
     if (action === 'multiplayer') showScreen('multiplayer');
     if (action === 'close-multiplayer') showScreen('menu');
+    if (action === 'mp-host-open') openHostModal();
+    if (action === 'mp-host-cancel') closeHostModal();
     if (action === 'mp-host') hostMatch();
     if (action === 'mp-join') joinMatch(document.getElementById('mp-join-input')?.value);
     if (action === 'mp-copy') {
@@ -671,9 +977,22 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
     }
     if (action === 'settings-apply') applyAndSaveSettings();
     if (action === 'settings-reset') {
-      settings = { ...DEFAULT_SETTINGS, announcement: { ...DEFAULT_SETTINGS.announcement } };
+      settings = {
+        ...DEFAULT_SETTINGS,
+        announcement: { ...DEFAULT_SETTINGS.announcement },
+        keyBindings: cloneKeyBindings(DEFAULT_KEY_BINDINGS),
+      };
       fillSettingsForm();
-      applyAndSaveSettings();
+      applySettingsEffects();
+      hud.toast(t('resetDefaults'));
+      return;
+    }
+    if (action === 'keybind-reset') {
+      settings.keyBindings = cloneKeyBindings(DEFAULT_KEY_BINDINGS);
+      refreshKeybindButtons();
+      input.setKeyBindings(settings.keyBindings);
+      hud.toast(t('keybindReset'));
+      return;
     }
     if (action === 'resume') {
       state = 'playing';
@@ -687,16 +1006,33 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
   });
 });
 
-document.querySelectorAll('.skin-btn').forEach((btn) => {
+function updatePlanePickerUi() {
+  const type = getPlaneType(planeTypeIndex);
+  document.querySelectorAll('.plane-btn').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.plane) === planeTypeIndex);
+  });
+  const tag = document.getElementById('plane-tagline');
+  if (tag) {
+    tag.textContent = `${t(type.nameKey)} — ${t(type.descKey)}`;
+  }
+}
+
+function selectPlane(index) {
+  planeTypeIndex = ((index % PLANE_TYPES.length) + PLANE_TYPES.length) % PLANE_TYPES.length;
+  skinIndex = planeTypeIndex;
+  localStorage.setItem('pokyplane_plane', String(planeTypeIndex));
+  updatePlanePickerUi();
+  if (state === 'menu') buildMenuPlane();
+}
+
+document.querySelectorAll('.plane-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
     await unlockAudio();
     sound.playUI('click');
-    skinIndex = Number(btn.dataset.skin);
-    document.querySelectorAll('.skin-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
-    if (state === 'menu') buildMenuPlane();
+    selectPlane(Number(btn.dataset.plane));
   });
 });
+updatePlanePickerUi();
 
 document.querySelectorAll('.lang-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
@@ -708,6 +1044,7 @@ document.querySelectorAll('.lang-btn').forEach((btn) => {
     syncLangButtons();
     updateBanner();
     fillSettingsForm();
+    updatePlanePickerUi();
   });
 });
 
@@ -736,6 +1073,10 @@ document.getElementById('menu-map')?.addEventListener('change', (e) => {
   localStorage.setItem('pokyplane_map', selectedMapId);
   const mpMap = document.getElementById('mp-map');
   if (mpMap) mpMap.value = selectedMapId;
+  if (world && world.mapId !== selectedMapId) {
+    ensureWorld(selectedMapId);
+    applySettingsEffects();
+  }
 });
 
 const menuMapEl = document.getElementById('menu-map');
@@ -757,11 +1098,15 @@ setLang(settings.language);
 syncLangButtons();
 applyDomLang();
 updateBanner();
+loadServerAnnouncement();
 fillSettingsForm();
+setupKeybindUI();
 setSettingsMode('simple');
 
-ensureWorld();
+syncWorldVisibility();
 buildMenuPlane();
+setupAuthUI();
+document.getElementById('mp-host-close')?.addEventListener('click', () => closeHostModal());
 camera.position.set(6, 3, 10);
 camera.lookAt(0, 1.5, 0);
 showScreen('menu');
@@ -771,7 +1116,7 @@ const menuLight = new THREE.DirectionalLight(0xffe8cc, 1);
 menuLight.position.set(5, 10, 7);
 scene.add(menuLight);
 scene.add(new THREE.AmbientLight(0x6080a0, 0.5));
-scene.background = new THREE.Color(0x1a4a7a);
+scene.background = null;
 
 // Auto-join from invite link
 const urlRoom = getRoomFromUrl();
@@ -815,7 +1160,7 @@ function updateMultiplayer(dt, fi) {
     qw: flight.quaternion.w,
     health: flight.health,
     throttle: flight.throttle,
-    skin: skinIndex,
+    skin: planeTypeIndex,
   });
 
   // Territory soft boundary
@@ -830,13 +1175,195 @@ function updateMultiplayer(dt, fi) {
   }
 }
 
-function tryFire(fi) {
+function handleWeaponImpact({ target, damage, point, owner, weapon }) {
+  if (!particles) return;
+  const p = point || target?.position;
+  if (!p) return;
+
+  const w = weapon || 'mg';
+  particles.emitImpactExplosion(p, { weapon: w });
+
+  if (w === 'missile' || w === 'rocket') {
+    sound.playExplosion(p.x, p.y, p.z);
+    if (settings.camShake) camRig.addShake(w === 'missile' ? 0.24 : 0.18);
+  } else if (w === 'cannon') {
+    sound.playExplosion(p.x, p.y, p.z);
+    if (settings.camShake) camRig.addShake(0.07);
+  } else if (w === 'mg') {
+    if (settings.camShake) camRig.addShake(0.012);
+  }
+}
+
+function buildHitTargets() {
+  const hitTargets = [];
+  if (gameMode === 'combat' && combat) {
+    combat.enemies.forEach((e) => {
+      if (e.alive) {
+        hitTargets.push({
+          position: e.position,
+          radius: 3.5,
+          id: e.id,
+          kind: 'ai',
+          ref: e,
+        });
+      }
+    });
+    hitTargets.push(...combat.getDecoyTargets());
+  }
+  if (gameMode === 'multiplayer' && remotePlane) {
+    hitTargets.push({
+      position: remoteInterp.pos,
+      radius: getPlaneHitRadius(remoteInterp.skin ?? 1),
+      id: 'peer',
+      kind: 'peer',
+      owner: 'remote',
+    });
+    hitTargets.push({
+      position: flight.position,
+      radius: flight.hitRadius ?? 3.2,
+      id: 'self',
+      kind: 'self',
+      owner: 'local',
+    });
+  }
+  return hitTargets;
+}
+
+function getIncomingMissiles() {
+  if (!weapons) return [];
+  const out = [];
+  for (const b of weapons.bullets) {
+    if (!b.homing || b.weapon !== 'missile') continue;
+    out.push({
+      pos: b.mesh.position,
+      vel: b.vel,
+      lockId: b.lockId,
+      lockKind: b.lockKind,
+    });
+  }
+  return out;
+}
+
+function buildThreatSources(hitTargets) {
+  const threats = [];
+  for (const t of hitTargets) {
+    if (t.kind === 'ai' || t.kind === 'peer') {
+      threats.push({ position: t.position, id: t.id, kind: t.kind });
+    }
+  }
+  return threats;
+}
+
+function updateAimReticle(hitTargets, dt) {
+  const weaponsOn =
+    weapons &&
+    gameMode !== 'race' &&
+    !(gameMode === 'multiplayer' && !mpLobby.weapons);
+
+  if (!weaponsOn) {
+    hud.updateReticle({ visible: false });
+    hud.updateThreatIndicators([]);
+    hud.updateLockStatus(null);
+    return;
+  }
+
+  _aimDir.copy(flight.forward).normalize();
+  _aimOrigin.copy(flight.position).addScaledVector(_aimDir, 3.2);
+  const aimTargets = hitTargets.filter((t) => t.kind !== 'self' && t.kind !== 'flare');
+  const assistHit = findAimAssistTarget(_aimOrigin, _aimDir, aimTargets, {
+    maxDist: 520,
+    coneHalf: input.lockHeld ? 0.55 : 0.42,
+  });
+
+  targetLock.update(dt, hitTargets, assistHit, input.lockHeld, flight.position);
+  const locked = targetLock.getLockedTarget(hitTargets);
+  const hardLocked = !!locked;
+
+  if (hardLocked) {
+    _aimWorld.copy(locked.position);
+  } else if (assistHit?.point) {
+    _aimWorld.copy(assistHit.point);
+  } else {
+    _aimWorld.copy(_aimOrigin).addScaledVector(_aimDir, 260);
+  }
+
+  _aimProj.copy(_aimWorld).project(camera);
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const onScreen =
+    _aimProj.z >= -1 &&
+    _aimProj.z <= 1 &&
+    Math.abs(_aimProj.x) <= 1.05 &&
+    Math.abs(_aimProj.y) <= 1.05;
+
+  const dist = hardLocked
+    ? flight.position.distanceTo(locked.position)
+    : assistHit?.dist ?? null;
+
+  hud.updateReticle({
+    visible: true,
+    x: (_aimProj.x * 0.5 + 0.5) * w,
+    y: (-_aimProj.y * 0.5 + 0.5) * h,
+    weapon: weapons.activeId,
+    locked: !!(input.lockHeld || assistHit?.target) && targetLock.acquireRatio > 0.03,
+    hardLocked,
+    acquiring: input.lockHeld ? targetLock.acquireRatio : assistHit ? 0.12 : 0,
+    dist,
+    onScreen,
+    softTarget: !!assistHit?.target && !hardLocked,
+  });
+
+  if (hardLocked) {
+    hud.updateLockStatus(t('targetLocked'));
+  } else if (input.lockHeld && targetLock.acquireRatio > 0.05) {
+    hud.updateLockStatus(`${t('targetLocking')} ${Math.round(targetLock.acquireRatio * 100)}%`);
+  } else {
+    hud.updateLockStatus(null);
+  }
+
+  if (targetLock.consumeJustLocked()) {
+    hud.toast(t('targetLocked'), 1000);
+    sound.playUI('success');
+  }
+
+  if (_prevLockId != null && targetLock.lockId == null && gameMode === 'combat') {
+    hud.toast(t('targetLost'), 1200);
+  }
+  _prevLockId = targetLock.lockId;
+
+  const threats = buildThreatSources(hitTargets);
+  const showThreats = gameMode === 'combat' || gameMode === 'multiplayer';
+  hud.updateThreatIndicators(
+    showThreats ? buildThreatMarkers(threats, camera, flight.position, targetLock) : []
+  );
+}
+
+function tryFire(fi, hitTargets) {
   if (!fi.fire || !weapons) return;
   if (gameMode === 'race') return;
   if (gameMode === 'multiplayer' && !mpLobby.weapons) return;
 
   const origin = flight.position.clone().addScaledVector(flight.forward, 3.2);
-  const shot = weapons.fire(origin, flight.forward, { owner: 'local' });
+  const locked = targetLock.getLockedTarget(hitTargets);
+  const lockTarget = locked ? { id: locked.id, kind: locked.kind } : null;
+
+  let fireDir = flight.forward.clone().normalize();
+  if (locked) {
+    _aimDir.subVectors(locked.position, origin).normalize();
+    const bias = weapons.activeId === 'missile' ? 0.5 : weapons.activeId === 'rocket' ? 0.35 : 0.22;
+    fireDir.lerp(_aimDir, bias).normalize();
+  } else if (input.lockHeld) {
+    const soft = findAimAssistTarget(origin, fireDir, hitTargets, { maxDist: 520, coneHalf: 0.55 });
+    if (soft?.target) {
+      _aimDir.subVectors(soft.point, origin).normalize();
+      fireDir.lerp(_aimDir, 0.18).normalize();
+    }
+  }
+
+  const shot = weapons.fire(origin, fireDir, {
+    owner: 'local',
+    lockTarget,
+  });
   if (!shot) return;
   if (weapons.active.sound === 'rocket') sound.playRocket();
   else sound.playGunfire();
@@ -885,6 +1412,12 @@ function updatePlaying(dt) {
     input.mouse.x *= settings.mouseSens;
     input.mouse.y *= settings.mouseSens;
   }
+
+  flight.setEnvironment({
+    mapWind: getMapWind(world.map, weather),
+    weather,
+    time: performance.now() * 0.001,
+  });
 
   flight.update(dt, fi, (x, z) => world.getHeight(x, z));
 
@@ -937,7 +1470,7 @@ function updatePlaying(dt) {
 
   sound.updateEngine(flight.throttle);
   sound.updateWind(flight.airspeed / flight.maxSpeed);
-  sound.setStall(flight.stalling);
+  sound.setStall(flight.stalling || flight.spinning);
   sound.setListener(
     camera.position.x,
     camera.position.y,
@@ -947,61 +1480,65 @@ function updatePlaying(dt) {
     flight.forward.z
   );
 
-  if (flight.stalling && settings.camShake) camRig.addShake(0.015);
+  if ((flight.stalling || flight.spinning) && settings.camShake) camRig.addShake(flight.spinning ? 0.028 : 0.015);
 
-  tryFire(fi);
-
-  // Weapon hit resolution
-  const hitTargets = [];
   if (gameMode === 'combat' && combat) {
-    combat.enemies.forEach((e, i) => {
-      if (e.alive) hitTargets.push({ position: e.position, radius: 3.5, id: i, kind: 'ai', ref: e });
-    });
-  }
-  if (gameMode === 'multiplayer' && remotePlane) {
-    hitTargets.push({
-      position: remoteInterp.pos,
-      radius: 3.4,
-      id: 'peer',
-      kind: 'peer',
-      owner: 'remote',
-    });
-    // Let enemy missiles home toward us
-    hitTargets.push({
-      position: flight.position,
-      radius: 3.4,
-      id: 'self',
-      kind: 'self',
-      owner: 'local',
-    });
-  }
-  weapons?.update(dt, hitTargets, ({ target, damage }) => {
-    if (target.kind === 'ai' && target.ref) {
-      if (target.ref.hit(damage)) {
-        particles.burstExplosion(target.position);
-        sound.playExplosion(target.position.x, target.position.y, target.position.z);
-        combat.score += 250;
-        hud.toast(t('enemyDown'));
+    const wasStarted = combat.started;
+    combat.update(
+      dt,
+      flight,
+      (x, z) => world.getHeight(x, z),
+      (pos) => {
+        particles?.emitImpactExplosion(pos, { weapon: 'rocket' });
+      },
+      (dmg) => {
+        const mods = difficultyMods(settings.difficulty);
+        flight.takeDamage(dmg * mods.damageScale);
+        if (settings.camShake) camRig.addShake(0.14);
+      },
+      getIncomingMissiles(),
+      (pos, enemyId) => {
+        particles?.burstExplosion(pos, 35);
+        for (const b of weapons?.bullets || []) {
+          if (b.homing && b.lockId === enemyId && b.lockKind === 'ai') {
+            b.lockBroken = true;
+          }
+        }
       }
-    } else if (target.kind === 'peer') {
-      // Local confirmation juice — damage applied on their client via tracers + state
-      sound.playUI('success');
-      camRig.addShake(settings.camShake ? 0.12 : 0);
+    );
+    if (!wasStarted && combat.started) {
+      hud.toast(`${t('modeCombat')} — Wave ${combat.wave}!`);
     }
-  });
+  }
 
-  // Apply remote bullet hits to local player
-  if (gameMode === 'multiplayer' && weapons) {
-    for (const b of weapons.bullets) {
-      if (b.owner !== 'remote') continue;
-      if (b.mesh.position.distanceTo(flight.position) < 3.2) {
-        const mods = difficultyMods(mpLobby.difficulty);
-        flight.takeDamage(b.damage * mods.damageScale);
-        camRig.addShake(settings.camShake ? 0.3 : 0);
-        b.life = 0;
+  const hitTargets = buildHitTargets();
+
+  tryFire(fi, hitTargets);
+
+  weapons?.update(
+    dt,
+    hitTargets,
+    ({ target, damage, point, owner, weapon }) => {
+      handleWeaponImpact({ target, damage, point, owner, weapon });
+
+      if (target.kind === 'ai' && target.ref) {
+        if (target.ref.hit(damage)) {
+          if (combat) combat.score += 250;
+          hud.toast(t('enemyDown'));
+          if (targetLock.lockId === target.ref.id) targetLock.clear();
+        }
+      } else if (target.kind === 'peer') {
+        sound.playUI('success');
+      } else if (target.kind === 'self' && owner !== 'local') {
+        const mods = difficultyMods(
+          gameMode === 'multiplayer' ? mpLobby.difficulty : settings.difficulty
+        );
+        flight.takeDamage(damage * mods.damageScale);
+        if (settings.camShake) camRig.addShake(0.28);
       }
-    }
-  }
+    },
+    world ? (x, z) => world.getHeight(x, z) : null
+  );
 
   if (gameMode === 'multiplayer') updateMultiplayer(dt, fi);
 
@@ -1010,6 +1547,16 @@ function updatePlaying(dt) {
   let objective = t('objectiveFree');
   const markers = [];
   if (fuelDrops?.enabled) markers.push(...fuelDrops.markers());
+  if (world?.getAirportMarkers) {
+    for (const ap of world.getAirportMarkers()) {
+      markers.push({
+        x: ap.x,
+        z: ap.z,
+        color: ap.primary ? '#fbbf24' : '#60a5fa',
+        r: ap.primary ? 4.5 : 3.2,
+      });
+    }
+  }
   let territoryHud = {
     radius: gameMode === 'multiplayer' ? world.mpTerritory : null,
     worldBound: world.worldBound,
@@ -1055,25 +1602,23 @@ function updatePlaying(dt) {
   }
 
   if (gameMode === 'combat' && combat) {
-    combat.update(
-      dt,
-      flight,
-      (x, z) => world.getHeight(x, z),
-      (pos) => {
-        particles.burstExplosion(pos);
-        sound.playExplosion(pos.x, pos.y, pos.z);
-        hud.toast(t('enemyDown'));
-      },
-      (dmg) => {
-        const mods = difficultyMods(settings.difficulty);
-        flight.takeDamage(dmg * mods.damageScale);
-        if (settings.camShake) camRig.addShake(0.2);
-      }
-    );
     score = combat.score;
-    objective = `Wave ${combat.wave}`;
+    objective = combat.started
+      ? `Wave ${combat.wave}`
+      : t('combatTakeoff');
     combat.enemies.forEach((e) => {
-      if (e.alive) markers.push({ x: e.position.x, z: e.position.z, color: '#f87171', r: 3 });
+      if (e.alive) {
+        const d = flight.position.distanceTo(e.position);
+        markers.push({
+          id: e.id,
+          kind: 'enemy',
+          x: e.position.x,
+          z: e.position.z,
+          color: '#f87171',
+          r: 3.5,
+          dist: d,
+        });
+      }
     });
   }
 
@@ -1081,11 +1626,14 @@ function updatePlaying(dt) {
     objective = t('objectiveMp');
     score = Math.max(0, Math.floor(100 - remoteInterp.health));
     markers.push({
+      id: 'peer',
+      kind: 'peer',
       x: remoteInterp.pos.x,
       z: remoteInterp.pos.z,
-      color: '#f87171',
+      color: '#60a5fa',
       r: 5,
       shape: 'diamond',
+      dist: flight.position.distanceTo(remoteInterp.pos),
     });
   }
 
@@ -1102,7 +1650,12 @@ function updatePlaying(dt) {
     return;
   }
 
-  if (settings.weatherCycle) {
+  const weatherOn =
+    gameMode === 'multiplayer' ? mpLobby.weatherCycle !== false : settings.weatherCycle;
+  const dayNightOn =
+    gameMode === 'multiplayer' ? mpLobby.dayNight !== false : settings.dayNight;
+
+  if (weatherOn) {
     weatherTimer -= dt;
     if (weatherTimer <= 0) {
       const modes = ['clear', 'clear', 'rain', 'snow'];
@@ -1115,8 +1668,11 @@ function updatePlaying(dt) {
     }
   }
 
-  const worldDt = settings.dayNight ? dt : 0;
-  world.update(worldDt || dt * 0.0001, weather, flight.position);
+  const worldDt = dayNightOn ? dt : 0;
+  world.update(worldDt, weather, flight.position, {
+    advanceTime: dayNightOn,
+    velocity: flight.velocity,
+  });
 
   const shadow = planeGroup.getObjectByName('fakeShadow');
   if (shadow) {
@@ -1139,6 +1695,29 @@ function updatePlaying(dt) {
           ? t('modeMp')
           : t('modeCombat');
 
+  const radarRange =
+    gameMode === 'combat' ? 800 : gameMode === 'multiplayer' ? 650 : 240;
+
+  if (!settings.camShake) camRig.shake = 0;
+  camRig.update(dt, flight, {
+    mouse: settings.mouseLook ? input.mouse : { x: 0, y: 0 },
+    boost: fi.boost,
+    getHeight: (x, z) => world.getHeight(x, z),
+    camShake: settings.camShake,
+  });
+
+  updateAimReticle(hitTargets, dt);
+
+  for (const m of markers) {
+    if (m.kind === 'enemy') {
+      m.locked = targetLock.isLockedOn(m.id, 'ai');
+      m.color = m.locked ? '#4ade80' : '#f87171';
+    } else if (m.kind === 'peer') {
+      m.locked = targetLock.isLockedOn('peer', 'peer');
+      m.color = m.locked ? '#4ade80' : '#60a5fa';
+    }
+  }
+
   hud.update({
     mode: modeLabel,
     score: gameMode === 'freeroam' ? Math.floor(flightTime) : score,
@@ -1152,24 +1731,19 @@ function updatePlaying(dt) {
     fuelLimit: flight.fuelLimit,
     objective,
     stalling: flight.stalling,
+    spinning: flight.spinning,
     playerPos: flight.position,
     markers,
     territory: territoryHud,
     mapTint: 'rgba(12, 36, 56, 0.82)',
     onGround: flight.onGround,
     weaponLabel: weapons ? t(weapons.active.nameKey) : '',
-  });
-
-  if (!settings.camShake) camRig.shake = 0;
-  camRig.update(dt, flight, {
-    mouse: settings.mouseLook ? input.mouse : { x: 0, y: 0 },
-    boost: fi.boost,
-    getHeight: (x, z) => world.getHeight(x, z),
-    camShake: settings.camShake,
+    radarRange,
   });
 }
 
 function updateMenu(dt) {
+  syncWorldVisibility();
   if (menuPlane && menuParts) {
     menuPlane.rotation.y += dt * 0.55;
     updatePlaneVisuals(
@@ -1185,14 +1759,16 @@ function updateMenu(dt) {
       dt
     );
   }
-  world?.update(dt * 0.3, 'clear', camera.position);
+  if (world?.group?.visible) {
+    world.update(dt, 'clear', camera.position, { advanceTime: false });
+  }
   const tOrbit = performance.now() * 0.0003;
   camera.position.set(Math.cos(tOrbit) * 9, 3.5, Math.sin(tOrbit) * 9);
   camera.lookAt(0, 1.2, 0);
 }
 
 function frame(now) {
-  requestAnimationFrame(frame);
+  rafId = requestAnimationFrame(frame);
 
   // FPS cap
   const cap = settings.fpsCap;
@@ -1233,6 +1809,14 @@ function frame(now) {
   renderer.render(scene, camera);
 }
 
+let rafId = 0;
 requestAnimationFrame(frame);
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    cancelAnimationFrame(rafId);
+    destroyWorld();
+  });
+}
 
 console.info('%cPokyPlane', 'color:#ff6b4a;font-weight:bold', '— EN/FA · settings · P2P multiplayer');

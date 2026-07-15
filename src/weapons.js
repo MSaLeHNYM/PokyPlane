@@ -70,6 +70,16 @@ export const DEFAULT_WEAPON_FLAGS = {
   missile: true,
 };
 
+export function isExplosiveWeapon(weaponId) {
+  return weaponId === 'rocket' || weaponId === 'missile';
+}
+
+function groundHitThreshold(weaponId) {
+  if (weaponId === 'mg') return 0.55;
+  if (weaponId === 'cannon') return 0.95;
+  return 1.45;
+}
+
 export class WeaponSystem {
   constructor(scene) {
     this.scene = scene;
@@ -179,6 +189,9 @@ export class WeaponSystem {
       weapon: weaponId,
       homing: !!def.homing,
       turnRate: def.turnRate || 0,
+      lockId: opts.lockTarget?.id ?? null,
+      lockKind: opts.lockTarget?.kind ?? null,
+      lockBroken: false,
     });
 
     return {
@@ -205,26 +218,45 @@ export class WeaponSystem {
     return null;
   }
 
-  update(dt, hitTargets = [], onHit) {
+  update(dt, hitTargets = [], onHit, getGroundHeight = null) {
     this.cooldown = Math.max(0, this.cooldown - dt);
     const _aim = new THREE.Vector3();
+    const _sample = new THREE.Vector3();
 
     for (let i = this.bullets.length - 1; i >= 0; i--) {
       const b = this.bullets[i];
       const prev = b.mesh.position.clone();
 
-      // Homing: gently turn toward nearest valid target
+      // Homing: follow locked target, else nearest; flares can seduce missile after lock break
       if (b.homing && hitTargets.length) {
         let best = null;
-        let bestD = Infinity;
-        for (const t of hitTargets) {
-          if (t.owner && t.owner === b.owner) continue;
-          const d = b.mesh.position.distanceToSquared(t.position);
-          if (d < bestD) {
-            bestD = d;
-            best = t;
-          }
+
+        if (!b.lockBroken && b.lockId != null && b.lockKind) {
+          best = hitTargets.find((t) => t.id === b.lockId && t.kind === b.lockKind) || null;
+          if (!best) b.lockBroken = true;
         }
+
+        if (!best) {
+          let bestD = Infinity;
+          for (const t of hitTargets) {
+            if (t.owner && t.owner === b.owner) continue;
+            if (t.kind === 'flare') {
+              const d = b.mesh.position.distanceToSquared(t.position);
+              if (d < bestD && d < 160 * 160) {
+                bestD = d;
+                best = t;
+              }
+              continue;
+            }
+            const d = b.mesh.position.distanceToSquared(t.position);
+            if (d < bestD) {
+              bestD = d;
+              best = t;
+            }
+          }
+          if (best?.kind === 'flare') b.lockBroken = true;
+        }
+
         if (best) {
           _aim.copy(best.position).sub(b.mesh.position).normalize();
           const spd = b.vel.length();
@@ -243,19 +275,74 @@ export class WeaponSystem {
       }
 
       let hit = false;
+      let impactPoint = null;
+
       for (const t of hitTargets) {
         if (t.owner && t.owner === b.owner) continue;
         const r = t.radius ?? 3.2;
+        if (t.kind === 'flare') {
+          if (b.mesh.position.distanceTo(t.position) < r + 0.8) {
+            impactPoint = b.mesh.position.clone();
+            onHit?.({
+              target: t,
+              damage: 0,
+              point: impactPoint,
+              owner: b.owner,
+              weapon: b.weapon,
+            });
+            hit = true;
+            break;
+          }
+          continue;
+        }
         if (b.mesh.position.distanceTo(t.position) < r + 1.5) {
-          onHit?.({ target: t, damage: b.damage, point: b.mesh.position.clone(), owner: b.owner, weapon: b.weapon });
+          impactPoint = b.mesh.position.clone();
+          onHit?.({
+            target: t,
+            damage: b.damage,
+            point: impactPoint,
+            owner: b.owner,
+            weapon: b.weapon,
+          });
           hit = true;
           break;
         }
         const mid = prev.clone().lerp(b.mesh.position, 0.5);
         if (mid.distanceTo(t.position) < r + 1.2) {
-          onHit?.({ target: t, damage: b.damage, point: mid, owner: b.owner, weapon: b.weapon });
+          impactPoint = mid;
+          onHit?.({
+            target: t,
+            damage: b.damage,
+            point: impactPoint,
+            owner: b.owner,
+            weapon: b.weapon,
+          });
           hit = true;
           break;
+        }
+      }
+
+      // Detonate on terrain — all weapons (mg/cannon = small puff, rocket/missile = big blast)
+      if (!hit && getGroundHeight) {
+        const steps = 5;
+        const groundY = groundHitThreshold(b.weapon);
+        for (let s = 0; s <= steps; s++) {
+          const u = s / steps;
+          _sample.lerpVectors(prev, b.mesh.position, u);
+          const gy = getGroundHeight(_sample.x, _sample.z);
+          if (_sample.y <= gy + groundY) {
+            impactPoint = _sample.clone();
+            impactPoint.y = gy + 0.35;
+            onHit?.({
+              target: { kind: 'terrain' },
+              damage: 0,
+              point: impactPoint,
+              owner: b.owner,
+              weapon: b.weapon,
+            });
+            hit = true;
+            break;
+          }
         }
       }
 

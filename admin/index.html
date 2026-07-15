@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PokyPlane Admin</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="stylesheet" href="/shared/ui-theme.css" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div id="login-screen" class="screen">
+    <div class="card">
+      <h1>PokyPlane Admin</h1>
+      <p>Sign in with an admin account.</p>
+      <form id="admin-login-form">
+        <label>Email<input type="email" id="admin-email" required autocomplete="username" /></label>
+        <label>Password<input type="password" id="admin-password" required autocomplete="current-password" /></label>
+        <button type="submit">Login</button>
+        <p id="login-error" class="error hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <div id="admin-app" class="hidden">
+    <header class="topbar">
+      <h1>Admin Panel</h1>
+      <div class="topbar-actions">
+        <span id="admin-user-label"></span>
+        <button type="button" id="admin-logout">Logout</button>
+      </div>
+    </header>
+
+    <section class="stats" id="stats-grid"></section>
+
+    <nav class="tabs">
+      <button type="button" class="tab active" data-tab="online">Online</button>
+      <button type="button" class="tab" data-tab="users">Users</button>
+      <button type="button" class="tab" data-tab="announcement">Announcement</button>
+      <button type="button" class="tab" data-tab="ipbans">IP Bans</button>
+      <button type="button" class="tab" data-tab="security">Security Log</button>
+    </nav>
+
+    <main>
+      <div id="tab-online" class="tab-pane">
+        <button type="button" class="refresh" data-refresh="online">Refresh</button>
+        <table><thead><tr>
+          <th>User</th><th>Status</th><th>Mode</th><th>IP</th><th>Last seen</th><th></th>
+        </tr></thead><tbody id="online-body"></tbody></table>
+      </div>
+
+      <div id="tab-users" class="tab-pane hidden">
+        <div class="toolbar">
+          <input type="search" id="user-search" placeholder="Search username or email…" />
+          <button type="button" class="refresh" data-refresh="users">Refresh</button>
+        </div>
+        <table><thead><tr>
+          <th>User</th><th>Role</th><th>Country</th><th>Last login</th><th>Status</th><th></th>
+        </tr></thead><tbody id="users-body"></tbody></table>
+      </div>
+
+      <div id="tab-announcement" class="tab-pane hidden">
+        <p class="pane-desc">Global banner on the game main menu for all players. Requires API server running (<code>npm run dev:api</code>).</p>
+        <form id="announcement-form" class="announce-form">
+          <label class="check-row">
+            <input type="checkbox" id="ann-enabled" checked />
+            <span>Show announcement banner</span>
+          </label>
+          <label>
+            English
+            <textarea id="ann-en" rows="3" maxlength="500" placeholder="Welcome pilots!"></textarea>
+          </label>
+          <label>
+            فارسی (Farsi)
+            <textarea id="ann-fa" rows="3" maxlength="500" dir="rtl" placeholder="خلبان‌ها خوش آمدید!"></textarea>
+          </label>
+          <div class="form-actions">
+            <button type="submit">Save announcement</button>
+            <span id="ann-status" class="status-msg hidden"></span>
+          </div>
+          <p id="ann-updated" class="muted-note"></p>
+        </form>
+      </div>
+
+      <div id="tab-ipbans" class="tab-pane hidden">
+        <form id="ip-ban-form" class="inline-form">
+          <input type="text" id="ban-ip" placeholder="IP address" required />
+          <input type="text" id="ban-reason" placeholder="Reason" />
+          <input type="number" id="ban-hours" placeholder="Hours (empty = permanent)" min="1" />
+          <button type="submit">Ban IP</button>
+        </form>
+        <table><thead><tr><th>IP</th><th>Reason</th><th>Expires</th><th></th></tr></thead>
+        <tbody id="ipbans-body"></tbody></table>
+      </div>
+
+      <div id="tab-security" class="tab-pane hidden">
+        <button type="button" class="refresh" data-refresh="security">Refresh</button>
+        <table><thead><tr><th>Time</th><th>Event</th><th>User</th><th>IP</th><th>Details</th></tr></thead>
+        <tbody id="security-body"></tbody></table>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="admin.js"></script>
+</body>
+</html>

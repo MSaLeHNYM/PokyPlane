@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" role="img" aria-label="PokyPlane">
+  <defs>
+    <linearGradient id="wingGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#457b9d"/>
+      <stop offset="100%" stop-color="#5eb8e8"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffd166"/>
+      <stop offset="100%" stop-color="#ff6b4a"/>
+    </linearGradient>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g transform="translate(8, 18)" filter="url(#softGlow)">
+    <path d="M4 52 Q-8 50 -18 48" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity="0.35" fill="none"/>
+    <ellipse cx="38" cy="48" rx="28" ry="10" fill="url(#wingGrad)"/>
+    <path d="M62 48 L78 48 L70 42 L70 54 Z" fill="#ff6b4a"/>
+    <ellipse cx="48" cy="44" rx="8" ry="5" fill="#7dd3fc" opacity="0.9"/>
+    <ellipse cx="46" cy="43" rx="3" ry="2" fill="#fff" opacity="0.5"/>
+    <path d="M30 48 L50 38 L50 58 Z" fill="#3b82f6" opacity="0.85"/>
+    <path d="M12 48 L20 38 L20 58 Z" fill="#ff6b4a"/>
+    <circle cx="76" cy="48" r="6" fill="#ffd166" opacity="0.45"/>
+  </g>
+
+  <text x="108" y="72" font-family="Arial Black, Impact, system-ui, sans-serif" font-size="50" font-weight="900" fill="#f4f8fc" letter-spacing="-1">Poky</text>
+  <text x="246" y="72" font-family="Arial Black, Impact, system-ui, sans-serif" font-size="50" font-weight="900" fill="url(#accentGrad)" letter-spacing="-1">Plane</text>
+
+  <circle cx="100" cy="28" r="3" fill="#ffd166" opacity="0.8"/>
+  <circle cx="390" cy="34" r="2.5" fill="#5eb8e8" opacity="0.7"/>
+  <path d="M378 88 L382 80 L386 88 L382 96 Z" fill="#ff6b4a" opacity="0.5"/>
+</svg>

@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <title>PokyPlane — Arcade Flight Simulator</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/favicon.png" />
   <link rel="stylesheet" href="/src/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,6 +19,7 @@
     <!-- HUD overlay -->
     <div id="hud" class="hidden">
       <div class="hud-top">
+        <img src="/logo.png" alt="" class="hud-logo" width="120" height="34" aria-hidden="true" />
         <div class="hud-panel" id="hud-mode">FREE ROAM</div>
         <div class="hud-panel" id="hud-score"><span data-i18n="score">Score</span>: 0</div>
         <div class="hud-panel" id="hud-timer">00:00</div>
@@ -24,6 +27,27 @@
       </div>
       <div class="hud-center">
         <div id="objective"></div>
+      </div>
+      <div id="threat-indicators" class="threat-indicators" aria-hidden="true"></div>
+      <div id="lock-status" class="lock-status hidden"></div>
+      <div id="target-reticle" class="target-reticle hidden" aria-hidden="true">
+        <svg class="reticle-svg" viewBox="0 0 48 48" width="48" height="48">
+          <circle class="reticle-ring" cx="24" cy="24" r="14" />
+          <line class="reticle-line" x1="24" y1="4" x2="24" y2="14" />
+          <line class="reticle-line" x1="24" y1="34" x2="24" y2="44" />
+          <line class="reticle-line" x1="4" y1="24" x2="14" y2="24" />
+          <line class="reticle-line" x1="34" y1="24" x2="44" y2="24" />
+          <line class="reticle-bracket" x1="8" y1="8" x2="8" y2="14" />
+          <line class="reticle-bracket" x1="8" y1="8" x2="14" y2="8" />
+          <line class="reticle-bracket" x1="40" y1="8" x2="40" y2="14" />
+          <line class="reticle-bracket" x1="40" y1="8" x2="34" y2="8" />
+          <line class="reticle-bracket" x1="8" y1="40" x2="8" y2="34" />
+          <line class="reticle-bracket" x1="8" y1="40" x2="14" y2="40" />
+          <line class="reticle-bracket" x1="40" y1="40" x2="40" y2="34" />
+          <line class="reticle-bracket" x1="40" y1="40" x2="34" y2="40" />
+          <circle class="reticle-dot" cx="24" cy="24" r="2.2" />
+        </svg>
+        <div class="reticle-range"></div>
       </div>
       <div class="hud-bottom">
         <div class="gauge">
@@ -55,7 +79,7 @@
           <div class="health-bar"><div id="health-fill"></div></div>
         </div>
       </div>
-      <canvas id="minimap" width="140" height="140"></canvas>
+      <canvas id="minimap" width="196" height="196"></canvas>
       <div id="stall-warning" class="hidden" data-i18n="stall">STALL</div>
       <div id="damage-vignette"></div>
     </div>
@@ -70,19 +94,31 @@
         <button type="button" id="announce-close" class="announce-close" data-i18n-title="closeBanner" title="Dismiss">×</button>
       </div>
 
-      <div class="lang-switch">
-        <button type="button" class="lang-btn active" data-lang="en">EN</button>
-        <button type="button" class="lang-btn" data-lang="fa">فا</button>
-      </div>
+      <header class="menu-topbar">
+        <div id="account-chip" class="account-chip hidden"></div>
+        <div class="lang-switch">
+          <button type="button" class="lang-btn active" data-lang="en">EN</button>
+          <button type="button" class="lang-btn" data-lang="fa">فا</button>
+        </div>
+      </header>
 
       <div class="menu-content">
-        <h1 class="logo">Poky<span>Plane</span></h1>
-        <p class="tagline" data-i18n="tagline">Arcade skies, cozy vibes</p>
-        <div class="skin-picker">
-          <button type="button" class="skin-btn" data-skin="0" title="Cherry Red">●</button>
-          <button type="button" class="skin-btn active" data-skin="1" title="Sky Blue">●</button>
-          <button type="button" class="skin-btn" data-skin="2" title="Sunny Yellow">●</button>
+        <div class="menu-brand">
+          <img src="/logo.png" alt="PokyPlane" class="game-logo" width="400" height="115" />
+          <h1 class="logo logo-sr">Poky<span>Plane</span></h1>
+          <p class="tagline" data-i18n="tagline">Arcade skies, cozy vibes</p>
         </div>
+        <div class="plane-picker" id="plane-picker" role="listbox" aria-label="Aircraft">
+          <button type="button" class="plane-btn active" data-plane="0" title="Poky Cub">🛩️</button>
+          <button type="button" class="plane-btn" data-plane="1" title="Sky Whale">🐋</button>
+          <button type="button" class="plane-btn" data-plane="2" title="Banana Biplane">🍌</button>
+          <button type="button" class="plane-btn" data-plane="3" title="War Falcon">⚔️</button>
+          <button type="button" class="plane-btn" data-plane="4" title="Micro Moth">🦋</button>
+          <button type="button" class="plane-btn" data-plane="5" title="Iron Fortress">💣</button>
+          <button type="button" class="plane-btn" data-plane="6" title="Loopy Stunt">🎪</button>
+          <button type="button" class="plane-btn" data-plane="7" title="Neon Racer">🏎️</button>
+        </div>
+        <p class="plane-tagline" id="plane-tagline"></p>
         <label class="map-picker">
           <span data-i18n="mapSelect">Map</span>
           <select id="menu-map">
@@ -100,6 +136,12 @@
           <button type="button" class="menu-btn" data-action="multiplayer" data-i18n="multiplayer">Multiplayer</button>
           <button type="button" class="menu-btn" data-action="options" data-i18n="settings">Settings</button>
         </nav>
+        <div class="menu-account-row hidden" id="menu-account-row">
+          <button type="button" class="menu-btn menu-btn-sm" id="btn-scoreboard" data-i18n="scoreboard">Scoreboard</button>
+          <button type="button" class="menu-btn menu-btn-sm" id="btn-profile" data-i18n="profile">Profile</button>
+          <button type="button" class="menu-btn menu-btn-sm" id="btn-logout" data-i18n="logout">Logout</button>
+        </div>
+        <button type="button" class="menu-btn menu-btn-login hidden" id="btn-login" data-i18n="login">Login</button>
         <p class="hint" data-i18n="hint">Click to enable audio · Esc to pause</p>
       </div>
     </div>
@@ -110,57 +152,10 @@
         <h2 data-i18n="multiplayerLobby">Multiplayer Lobby</h2>
         <p class="panel-desc" data-i18n="shareHint">Send this link to a friend — they join the same sky.</p>
 
-        <div id="mp-host-settings" class="mp-box">
-          <p class="mp-status" data-i18n="hostSettings">Host match settings</p>
-          <label class="setting-row">
-            <span data-i18n="mapSelect">Map</span>
-            <select id="mp-map">
-              <option value="meadow">Green Meadows</option>
-              <option value="desert">Sunscar Desert</option>
-              <option value="arctic">Frostbite Peaks</option>
-              <option value="islands">Coral Archipelago</option>
-              <option value="volcanic">Ember Crater</option>
-            </select>
-          </label>
-          <label class="setting-row">
-            <span data-i18n="mpMode">Mode</span>
-            <select id="mp-mode">
-              <option value="dogfight" data-i18n="dogfight">Dogfight</option>
-              <option value="freefly" data-i18n="freeRoam">Free Roam</option>
-            </select>
-          </label>
-          <label class="setting-row">
-            <span data-i18n="difficulty">Difficulty</span>
-            <select id="mp-difficulty">
-              <option value="easy" data-i18n="easy">Easy</option>
-              <option value="normal" selected data-i18n="normal">Normal</option>
-              <option value="hard" data-i18n="hard">Hard</option>
-            </select>
-          </label>
-          <label class="setting-row check">
-            <span data-i18n="fuelLimit">Fuel limit</span>
-            <input type="checkbox" id="mp-fuel-limit" />
-          </label>
-          <label class="setting-row check">
-            <span data-i18n="wpnMg">Machine Gun</span>
-            <input type="checkbox" id="mp-wpn-mg" checked />
-          </label>
-          <label class="setting-row check">
-            <span data-i18n="wpnCannon">Cannon</span>
-            <input type="checkbox" id="mp-wpn-cannon" checked />
-          </label>
-          <label class="setting-row check">
-            <span data-i18n="wpnRocket">Rockets</span>
-            <input type="checkbox" id="mp-wpn-rocket" checked />
-          </label>
-          <label class="setting-row check">
-            <span data-i18n="wpnMissile">Missiles</span>
-            <input type="checkbox" id="mp-wpn-missile" checked />
-          </label>
-        </div>
+        <div id="mp-host-settings" class="mp-box hidden" aria-hidden="true"></div>
 
         <div class="mp-actions" style="margin-top:0.75rem">
-          <button type="button" class="menu-btn primary" data-action="mp-host" data-i18n="hostMatch">Host a Match</button>
+          <button type="button" class="menu-btn primary" data-action="mp-host-open" data-i18n="hostMatch">Host a Match</button>
         </div>
         <div id="mp-host-box" class="mp-box hidden">
           <p id="mp-status" class="mp-status"></p>
@@ -218,6 +213,7 @@
                   <option value="low" data-i18n="low">Low</option>
                   <option value="medium" data-i18n="medium">Medium</option>
                   <option value="high" data-i18n="high">High</option>
+                  <option value="max" data-i18n="max">Max (Ultra)</option>
                 </select>
               </label>
               <label class="setting-row">
@@ -251,14 +247,20 @@
                 <input type="checkbox" id="set-showfps-simple" />
               </label>
               <label class="setting-row">
-                <span data-i18n="chunkDistance">Chunk distance</span>
-                <select id="set-chunkdist-simple">
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4" selected>4</option>
-                  <option value="5">5</option>
-                  <option value="6">6</option>
-                  <option value="8">8</option>
+                <span data-i18n="chunkDistance">View distance</span>
+                <select id="set-viewdist-simple">
+                  <option value="0.25">250 m</option>
+                  <option value="0.5">500 m</option>
+                  <option value="1" selected>1 km</option>
+                  <option value="2">2 km</option>
+                  <option value="5">5 km</option>
+                  <option value="10">10 km</option>
+                  <option value="25">25 km</option>
+                  <option value="50">50 km</option>
+                  <option value="100">100 km</option>
+                  <option value="250">250 km</option>
+                  <option value="500">500 km</option>
+                  <option value="1000">1000 km</option>
                 </select>
               </label>
             </div>
@@ -271,8 +273,10 @@
                   <option value="low" data-i18n="low">Low</option>
                   <option value="medium" data-i18n="medium">Medium</option>
                   <option value="high" data-i18n="high">High</option>
+                  <option value="max" data-i18n="max">Max (Ultra)</option>
                 </select>
               </label>
+              <p class="setting-note" data-i18n="maxNote">Cinematic visuals — needs a strong GPU. Reload after switching for full antialiasing.</p>
               <label class="setting-row">
                 <span data-i18n="fpsCap">FPS Cap</span>
                 <select id="set-fpscap">
@@ -307,16 +311,23 @@
                 <input type="checkbox" id="set-fog" checked />
               </label>
               <label class="setting-row">
-                <span data-i18n="chunkDistance">Chunk distance</span>
-                <select id="set-chunkdist">
-                  <option value="2">2 (Tiny)</option>
-                  <option value="3">3 (Short)</option>
-                  <option value="4" selected>4 (Normal)</option>
-                  <option value="5">5 (Far)</option>
-                  <option value="6">6 (Very Far)</option>
-                  <option value="8">8 (Extreme)</option>
+                <span data-i18n="chunkDistance">View distance</span>
+                <select id="set-viewdist">
+                  <option value="0.25">250 m</option>
+                  <option value="0.5">500 m</option>
+                  <option value="1" selected>1 km</option>
+                  <option value="2">2 km</option>
+                  <option value="5">5 km</option>
+                  <option value="10">10 km</option>
+                  <option value="25">25 km</option>
+                  <option value="50">50 km</option>
+                  <option value="100">100 km</option>
+                  <option value="250">250 km</option>
+                  <option value="500">500 km</option>
+                  <option value="1000">1000 km</option>
                 </select>
               </label>
+              <p class="setting-note" data-i18n="viewDistNote">Extends sky and horizon. Terrain loads in a ring around you (more at higher settings).</p>
               <p class="setting-note" data-i18n="graphicsNote">Some graphics changes apply on next flight.</p>
             </div>
 
@@ -408,6 +419,29 @@
                 <span data-i18n="fuelLimit">Fuel limit</span>
                 <input type="checkbox" id="set-fuellimit" />
               </label>
+              <label class="setting-row">
+                <span data-i18n="airportSpawnChance">Runway strip chance %</span>
+                <input type="number" id="set-airport-spawn" min="0" max="100" step="1" value="5" />
+              </label>
+              <p class="setting-note" data-i18n="airportSpawnNote">Each new terrain chunk may spawn a landing strip. Also affects random spawn location.</p>
+
+              <h3 class="settings-subhead" data-i18n="controls">Controls</h3>
+              <p class="setting-note" data-i18n="keybindHint">Click a key to rebind. Avoid Ctrl — browsers use Ctrl+W to close tabs.</p>
+              <div class="keybind-grid" id="keybind-grid">
+                <div class="keybind-row"><span data-i18n="keyThrottleUp">Speed up</span><button type="button" class="keybind-btn" data-bind="throttleUp"></button></div>
+                <div class="keybind-row"><span data-i18n="keyThrottleDown">Slow down / brake</span><button type="button" class="keybind-btn" data-bind="throttleDown"></button></div>
+                <div class="keybind-row"><span data-i18n="keyBoost">Boost</span><button type="button" class="keybind-btn" data-bind="boost"></button></div>
+                <div class="keybind-row"><span data-i18n="keyPitchUp">Pitch up (dive)</span><button type="button" class="keybind-btn" data-bind="pitchUp"></button></div>
+                <div class="keybind-row"><span data-i18n="keyPitchDown">Pitch down (climb)</span><button type="button" class="keybind-btn" data-bind="pitchDown"></button></div>
+                <div class="keybind-row"><span data-i18n="keyTurnLeft">Turn left</span><button type="button" class="keybind-btn" data-bind="turnLeft"></button></div>
+                <div class="keybind-row"><span data-i18n="keyTurnRight">Turn right</span><button type="button" class="keybind-btn" data-bind="turnRight"></button></div>
+                <div class="keybind-row"><span data-i18n="keyRollLeft">Roll left</span><button type="button" class="keybind-btn" data-bind="rollLeft"></button></div>
+                <div class="keybind-row"><span data-i18n="keyRollRight">Roll right</span><button type="button" class="keybind-btn" data-bind="rollRight"></button></div>
+                <div class="keybind-row"><span data-i18n="keyFire">Fire</span><button type="button" class="keybind-btn" data-bind="fire"></button></div>
+                <div class="keybind-row"><span data-i18n="keyCamera">Cycle camera</span><button type="button" class="keybind-btn" data-bind="camera"></button></div>
+                <div class="keybind-row"><span data-i18n="keyPause">Pause</span><button type="button" class="keybind-btn" data-bind="pause"></button></div>
+              </div>
+              <button type="button" class="menu-btn keybind-reset" data-action="keybind-reset" data-i18n="keybindReset">Reset keys to default</button>
             </div>
 
             <!-- ADVANCED: Language + Announcement -->
@@ -475,6 +509,143 @@
     </div>
 
     <div id="toast"></div>
+
+    <!-- Host match settings -->
+    <div id="mp-host-modal" class="modal hidden">
+      <div class="modal-panel modal-wide host-modal-panel">
+        <button type="button" class="modal-close" id="mp-host-close">×</button>
+        <h2 data-i18n="hostSettings">Host match settings</h2>
+        <p class="panel-desc" data-i18n="hostSettingsDesc">Configure the sky before you share the invite link.</p>
+
+        <div class="host-modal-grid">
+          <label class="setting-row">
+            <span data-i18n="mapSelect">Map</span>
+            <select id="mp-map">
+              <option value="meadow">Green Meadows</option>
+              <option value="desert">Sunscar Desert</option>
+              <option value="arctic">Frostbite Peaks</option>
+              <option value="islands">Coral Archipelago</option>
+              <option value="volcanic">Ember Crater</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span data-i18n="mpMode">Mode</span>
+            <select id="mp-mode">
+              <option value="dogfight" data-i18n="dogfight">Dogfight</option>
+              <option value="freefly" data-i18n="freeRoam">Free Roam</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span data-i18n="difficulty">Difficulty</span>
+            <select id="mp-difficulty">
+              <option value="easy" data-i18n="easy">Easy</option>
+              <option value="normal" selected data-i18n="normal">Normal</option>
+              <option value="hard" data-i18n="hard">Hard</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span data-i18n="maxPlayers">Max players</span>
+            <input type="number" id="mp-max-players" min="2" max="8" step="1" value="2" />
+          </label>
+          <label class="setting-row">
+            <span data-i18n="airportSpawnChance">Runway strip chance %</span>
+            <input type="number" id="mp-airport-spawn" min="0" max="100" step="1" value="5" />
+          </label>
+        </div>
+
+        <p class="setting-note" data-i18n="hostWeapons">Weapons</p>
+        <div class="host-check-grid">
+          <label class="setting-row check"><span data-i18n="wpnMg">Machine Gun</span><input type="checkbox" id="mp-wpn-mg" checked /></label>
+          <label class="setting-row check"><span data-i18n="wpnCannon">Cannon</span><input type="checkbox" id="mp-wpn-cannon" checked /></label>
+          <label class="setting-row check"><span data-i18n="wpnRocket">Rockets</span><input type="checkbox" id="mp-wpn-rocket" checked /></label>
+          <label class="setting-row check"><span data-i18n="wpnMissile">Missiles</span><input type="checkbox" id="mp-wpn-missile" checked /></label>
+        </div>
+
+        <p class="setting-note" data-i18n="hostPlanes">Allowed aircraft</p>
+        <div class="host-plane-grid" id="mp-plane-grid">
+          <label class="setting-row check"><span>🛩️ Poky</span><input type="checkbox" data-mp-plane="0" checked /></label>
+          <label class="setting-row check"><span>🐋 Whale</span><input type="checkbox" data-mp-plane="1" checked /></label>
+          <label class="setting-row check"><span>🍌 Banana</span><input type="checkbox" data-mp-plane="2" checked /></label>
+          <label class="setting-row check"><span>⚔️ Falcon</span><input type="checkbox" data-mp-plane="3" checked /></label>
+          <label class="setting-row check"><span>🦋 Moth</span><input type="checkbox" data-mp-plane="4" checked /></label>
+          <label class="setting-row check"><span>💣 Fortress</span><input type="checkbox" data-mp-plane="5" checked /></label>
+          <label class="setting-row check"><span>🎪 Loopy</span><input type="checkbox" data-mp-plane="6" checked /></label>
+          <label class="setting-row check"><span>🏎️ Neon</span><input type="checkbox" data-mp-plane="7" checked /></label>
+        </div>
+
+        <div class="host-check-grid">
+          <label class="setting-row check"><span data-i18n="fuelLimit">Fuel limit</span><input type="checkbox" id="mp-fuel-limit" /></label>
+          <label class="setting-row check"><span data-i18n="weatherCycle">Dynamic Weather</span><input type="checkbox" id="mp-weather" checked /></label>
+          <label class="setting-row check"><span data-i18n="dayNight">Day / Night Cycle</span><input type="checkbox" id="mp-daynight" checked /></label>
+        </div>
+
+        <div class="mp-row" style="margin-top:1rem">
+          <button type="button" class="menu-btn" data-action="mp-host-cancel" data-i18n="cancel">Cancel</button>
+          <button type="button" class="menu-btn primary" data-action="mp-host" data-i18n="startHosting">Start Hosting</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Auth -->
+    <div id="auth-modal" class="modal hidden">
+      <div class="modal-panel">
+        <button type="button" class="modal-close" id="auth-close">×</button>
+        <h2 data-i18n="login">Login</h2>
+        <form id="auth-form">
+          <div id="auth-register-fields" class="hidden">
+            <label><span data-i18n="username">Username</span><input id="auth-username" autocomplete="username" /></label>
+            <label><span data-i18n="displayName">Display name</span><input id="auth-display" autocomplete="nickname" /></label>
+          </div>
+          <label><span>Email</span><input id="auth-email" type="email" required autocomplete="email" /></label>
+          <label><span data-i18n="password">Password</span><input id="auth-password" type="password" required autocomplete="current-password" /></label>
+          <p id="auth-error" class="auth-error hidden"></p>
+          <button type="submit" class="menu-btn primary" id="auth-submit" data-i18n="login">Login</button>
+          <button type="button" class="menu-btn" id="auth-toggle-mode" data-i18n="needAccount">Create account</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Profile -->
+    <div id="profile-modal" class="modal hidden">
+      <div class="modal-panel modal-wide">
+        <button type="button" class="modal-close" id="profile-close">×</button>
+        <h2 data-i18n="profile">Profile</h2>
+        <form id="profile-form">
+          <label><span data-i18n="displayName">Display name</span><input id="profile-display" /></label>
+          <label><span data-i18n="country">Country</span><select id="profile-country"></select></label>
+          <label><span data-i18n="gender">Gender</span>
+            <select id="profile-gender">
+              <option value="male" data-i18n="genderMale">Male</option>
+              <option value="female" data-i18n="genderFemale">Female</option>
+              <option value="other" data-i18n="genderOther">Other</option>
+              <option value="prefer_not_say" data-i18n="genderPreferNot">Prefer not to say</option>
+            </select>
+          </label>
+          <label><span data-i18n="bio">Bio</span><textarea id="profile-bio" rows="2"></textarea></label>
+          <p class="setting-note" data-i18n="pickAvatar">Pick a pilot avatar</p>
+          <div id="avatar-grid" class="avatar-grid"></div>
+          <button type="submit" class="menu-btn primary" data-i18n="save">Save</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Scoreboard -->
+    <div id="scoreboard-modal" class="modal hidden">
+      <div class="modal-panel modal-wide">
+        <button type="button" class="modal-close" id="scoreboard-close">×</button>
+        <h2 data-i18n="scoreboard">Scoreboard</h2>
+        <div class="sb-tabs">
+          <button type="button" class="sb-tab active" data-mode="all" data-i18n="allModes">All</button>
+          <button type="button" class="sb-tab" data-mode="freeroam">Free Roam</button>
+          <button type="button" class="sb-tab" data-mode="race" data-i18n="ringRace">Ring Race</button>
+          <button type="button" class="sb-tab" data-mode="combat" data-i18n="skyCombat">Combat</button>
+        </div>
+        <table class="scoreboard-table">
+          <thead><tr><th>#</th><th data-i18n="pilot">Pilot</th><th></th><th data-i18n="score">Score</th></tr></thead>
+          <tbody id="scoreboard-body"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>

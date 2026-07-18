@@ -116,6 +116,8 @@ const waterFrag = /* glsl */ `
   void main() {
     vec3 N = normalize(vNormal);
     vec3 V = normalize(cameraPosition - vWorldPos);
+    // Double-sided sheet: flip normal when viewing from below so lighting/fresnel work.
+    if (dot(N, V) < 0.0) N = -N;
     float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.0);
     float depth = clamp(0.35 + abs(vWave) * 0.4, 0.0, 1.0);
     vec3 waterCol = mix(uDeep, uShallow, depth);
@@ -131,8 +133,10 @@ const waterFrag = /* glsl */ `
       waterCol += uSkyTop * fresnel * 0.08;
     }
 
-    float alpha = 0.62 + fresnel * (uPremium > 0.5 ? 0.32 : 0.0);
-    gl_FragColor = vec4(waterCol, alpha);
+    // Keep nadir views clearer so seabed / crater floors stay readable under the sheet.
+    float lookDown = smoothstep(0.35, 0.92, V.y);
+    float alpha = 0.48 + fresnel * (uPremium > 0.5 ? 0.28 : 0.12) - lookDown * 0.18;
+    gl_FragColor = vec4(waterCol, clamp(alpha, 0.22, 0.82));
   }
 `;
 
@@ -706,6 +710,7 @@ export class World {
   _ensureHorizonMaterial() {
     if (this._horizonMat || !this._terrainMat) return;
     this._horizonMat = this._terrainMat.clone();
+    this._horizonMat.side = THREE.DoubleSide;
     this._horizonMat.polygonOffset = true;
     this._horizonMat.polygonOffsetFactor = 2;
     this._horizonMat.polygonOffsetUnits = 2;
@@ -719,6 +724,8 @@ export class World {
     this._horizonMat.onBeforeCompile = (shader) => {
       shader.uniforms.uPlayerXZ = this._horizonCut.uPlayerXZ;
       shader.uniforms.uInnerR2 = this._horizonCut.uInnerR2;
+      // Do not use worldPosition from <worldpos_vertex> — it is only declared when
+      // shadows/envmap/etc. are on, so the cutout shader failed on low/medium/high.
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
@@ -726,9 +733,9 @@ export class World {
 varying vec3 vHorizonWorld;`
         )
         .replace(
-          '#include <worldpos_vertex>',
-          `#include <worldpos_vertex>
-vHorizonWorld = worldPosition.xyz;`
+          '#include <project_vertex>',
+          `#include <project_vertex>
+vHorizonWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;`
         );
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -745,13 +752,14 @@ vec2 hDelta = vHorizonWorld.xz - uPlayerXZ;
 if (dot(hDelta, hDelta) < uInnerR2) discard;`
         );
     };
-    this._horizonMat.customProgramCacheKey = () => 'horizon-cut-v1';
+    this._horizonMat.customProgramCacheKey = () => 'horizon-cut-v2';
   }
 
   _syncHorizonCutout(x, z) {
     if (!this._horizonCut) return;
-    // Slightly larger than the loaded chunk disk so the seam sits outside detail meshes.
-    const inner = Math.max(CHUNK_SIZE * 2, this.loadRadius * CHUNK_SIZE * 1.2);
+    // Larger than the loaded chunk disk so coarse horizon triangles cannot lid
+    // valleys / craters inside the detail ring (and a bit past the seam).
+    const inner = Math.max(CHUNK_SIZE * 2.5, this.loadRadius * CHUNK_SIZE * 1.45);
     this._horizonCut.uPlayerXZ.value.set(x, z);
     this._horizonCut.uInnerR2.value = inner * inner;
   }
@@ -958,6 +966,7 @@ if (dot(hDelta, hDelta) < uInnerR2) discard;`
         uniforms: this.uniforms.water,
         vertexShader: waterVert,
         fragmentShader: waterFrag,
+        side: THREE.DoubleSide,
         transparent: true,
         depthWrite: false,
         depthTest: true,

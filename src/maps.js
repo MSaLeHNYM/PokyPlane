@@ -218,7 +218,7 @@ export const MAPS = [
     treeTrunk: 0x1a1010,
     rockColor: 0x3a3035,
     props: 'rocks',
-    waterY: 0.0,
+    waterY: -8.0,
     worldBound: 380,
     mpTerritory: 190,
     lava: true,

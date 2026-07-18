@@ -3,6 +3,28 @@
  * Self-contained — no external textures or libraries.
  */
 
+/** Avalanche mix — deterministic uint32 hash for seed channels. */
+export function hashU32(n) {
+  let x = n >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
+  x = Math.imul(x ^ (x >>> 15), 0x846ca68b);
+  return (x ^ (x >>> 16)) >>> 0;
+}
+
+/** Derive a stable channel seed from world + theme base. */
+export function deriveSeed(worldSeed, themeBaseSeed, channel = 1) {
+  return hashU32(
+    (worldSeed >>> 0) ^ Math.imul((themeBaseSeed >>> 0) || 1, 0x9e3779b9) ^ Math.imul(channel | 0, 0x85ebca6b)
+  );
+}
+
+/** Random uint32 for a new play session. */
+export function randomWorldSeed() {
+  const a = (Math.random() * 0xffffffff) >>> 0;
+  const b = (Date.now() & 0xffff) << 16;
+  return hashU32(a ^ b ^ ((performance.now() * 1000) | 0));
+}
+
 function fade(t) {
   return t * t * t * (t * (t * 6 - 15) + 10);
 }

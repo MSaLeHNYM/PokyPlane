@@ -31,6 +31,8 @@ export class HUD {
       lockStatus: document.getElementById('lock-status'),
     };
     this._threatPool = [];
+    this._retSX = null;
+    this._retSY = null;
     this.mctx = this.els.minimap?.getContext('2d');
     if (this.els.minimap) {
       this.els.minimap.width = 196;
@@ -156,10 +158,23 @@ export class HUD {
     if (!el) return;
 
     el.classList.toggle('hidden', !visible);
-    if (!visible) return;
+    if (!visible) {
+      this._retSX = null;
+      this._retSY = null;
+      return;
+    }
 
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
+    // Light screen blend on top of world-smoothed aim — dampens 1-frame projection pops.
+    if (this._retSX == null || this._retSY == null) {
+      this._retSX = x;
+      this._retSY = y;
+    } else {
+      const a = hardLocked ? 0.55 : softTarget ? 0.38 : 0.48;
+      this._retSX += (x - this._retSX) * a;
+      this._retSY += (y - this._retSY) * a;
+    }
+
+    el.style.transform = `translate3d(${this._retSX - 24}px, ${this._retSY - 24}px, 0)`;
     el.classList.toggle('locked', locked);
     el.classList.toggle('hard-locked', hardLocked);
     el.classList.toggle('soft-target', softTarget);
@@ -221,16 +236,40 @@ export class HUD {
     }
   }
 
+  _syncMinimapCanvas() {
+    const canvas = this.els.minimap;
+    if (!canvas) return 1;
+    const rect = canvas.getBoundingClientRect();
+    const css = Math.max(48, Math.round(Math.min(rect.width || 196, rect.height || 196)));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const px = Math.round(css * dpr);
+    if (canvas.width !== px || canvas.height !== px) {
+      canvas.width = px;
+      canvas.height = px;
+    }
+    return dpr;
+  }
+
   _drawMinimap(playerPos, heading, markers, territory, mapTint, onGround, radarRange) {
     const ctx = this.mctx;
     const canvas = this.els.minimap;
-    if (!ctx || !canvas) return;
+    if (!ctx || !canvas || !playerPos) return;
+    const dpr = this._syncMinimapCanvas();
     const w = canvas.width;
     const h = canvas.height;
     const cx = w / 2;
     const cy = h / 2;
-    const radius = w / 2 - 4;
+    const radius = w / 2 - 4 * dpr;
     const scale = radius / radarRange;
+    const lw = (n) => n * dpr;
+    const font = (n) => `bold ${Math.max(8, Math.round(n * dpr))}px Nunito, Vazirmatn, sans-serif`;
+    const headingRad = ((heading || 0) * Math.PI) / 180;
+
+    // World +Z = North. Canvas Y down → negate Z. Map rotates for heading-up.
+    const toRadar = (wx, wz) => ({
+      x: (wx - playerPos.x) * scale,
+      y: -(wz - playerPos.z) * scale,
+    });
 
     ctx.clearRect(0, 0, w, h);
 
@@ -242,19 +281,21 @@ export class HUD {
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
     ctx.fillStyle = grad;
     ctx.fill();
-    ctx.lineWidth = 2;
+    ctx.lineWidth = lw(2);
     ctx.strokeStyle = onGround ? 'rgba(74, 222, 128, 0.55)' : 'rgba(96, 165, 250, 0.45)';
     ctx.stroke();
 
     ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, radius - 1, 0, Math.PI * 2);
+    ctx.arc(cx, cy, radius - dpr, 0, Math.PI * 2);
     ctx.clip();
     ctx.translate(cx, cy);
-    ctx.rotate((-heading * Math.PI) / 180);
+    // Heading-up: rotate world so aircraft forward is always screen-up.
+    // Canvas Y-down: use -heading (same sign as prior north-up icon fix).
+    ctx.rotate(-headingRad);
 
     // Range rings
-    ctx.lineWidth = 1;
+    ctx.lineWidth = lw(1);
     for (const frac of [0.25, 0.5, 0.75, 1]) {
       ctx.beginPath();
       ctx.arc(0, 0, radius * frac, 0, Math.PI * 2);
@@ -263,7 +304,7 @@ export class HUD {
       ctx.stroke();
     }
 
-    // Cross grid
+    // Cross grid (aligned to aircraft axes in heading-up)
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     ctx.beginPath();
     ctx.moveTo(-radius, 0);
@@ -272,40 +313,38 @@ export class HUD {
     ctx.lineTo(0, radius);
     ctx.stroke();
 
-    const hx = -playerPos.x * scale;
-    const hz = -playerPos.z * scale;
-
+    // World-origin / territory circle (relative to player)
+    const origin = toRadar(0, 0);
     if (territory?.radius) {
       ctx.beginPath();
-      ctx.arc(hx, hz, territory.radius * scale, 0, Math.PI * 2);
+      ctx.arc(origin.x, origin.y, territory.radius * scale, 0, Math.PI * 2);
       ctx.strokeStyle = territory.warning ? 'rgba(248,113,113,0.85)' : 'rgba(74,222,128,0.45)';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([5, 4]);
+      ctx.lineWidth = lw(1.5);
+      ctx.setLineDash([5 * dpr, 4 * dpr]);
       ctx.stroke();
       ctx.setLineDash([]);
     }
 
     // Blips — inside radar or clamped to rim for long range
     for (const m of markers) {
-      const dx = (m.x - playerPos.x) * scale;
-      const dz = (m.z - playerPos.z) * scale;
-      const dist = Math.hypot(dx, dz);
-      const ang = Math.atan2(dz, dx);
-      const inside = dist <= radius - 6;
-      const px = inside ? dx : Math.cos(ang) * (radius - 5);
-      const pz = inside ? dz : Math.sin(ang) * (radius - 5);
-      const dotR = m.locked ? 4.5 : inside ? m.r || 3.5 : 3;
+      const p = toRadar(m.x, m.z);
+      const dist = Math.hypot(p.x, p.y);
+      const ang = Math.atan2(p.y, p.x);
+      const rim = radius - 6 * dpr;
+      const inside = dist <= rim;
+      const px = inside ? p.x : Math.cos(ang) * (radius - 5 * dpr);
+      const pz = inside ? p.y : Math.sin(ang) * (radius - 5 * dpr);
+      const dotR = (m.locked ? 4.5 : inside ? m.r || 3.5 : 3) * dpr;
 
       if (!inside) {
-        // Rim tick pointing toward contact
         ctx.save();
         ctx.translate(px, pz);
         ctx.rotate(ang);
         ctx.fillStyle = m.color || '#f87171';
         ctx.beginPath();
-        ctx.moveTo(5, 0);
-        ctx.lineTo(-2, -3);
-        ctx.lineTo(-2, 3);
+        ctx.moveTo(5 * dpr, 0);
+        ctx.lineTo(-2 * dpr, -3 * dpr);
+        ctx.lineTo(-2 * dpr, 3 * dpr);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
@@ -325,7 +364,7 @@ export class HUD {
         ctx.fill();
         if (m.locked) {
           ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-          ctx.lineWidth = 1.5;
+          ctx.lineWidth = lw(1.5);
           ctx.stroke();
         }
       }
@@ -334,39 +373,46 @@ export class HUD {
         const label = m.dist != null ? `${Math.round(m.dist)}` : '';
         if (label) {
           ctx.fillStyle = 'rgba(255,255,255,0.75)';
-          ctx.font = 'bold 8px Nunito, Vazirmatn, sans-serif';
+          ctx.font = font(8);
           ctx.textAlign = 'center';
-          ctx.fillText(label, px, pz - dotR - 3);
+          ctx.fillText(label, px, pz - dotR - 3 * dpr);
         }
       }
     }
 
-    // Player icon
+    // Un-rotate for fixed nose-up player icon (always points toward top of radar)
+    ctx.rotate(headingRad);
     ctx.fillStyle = '#94a3b8';
-    ctx.fillRect(hx - 2, hz - 9, 4, 18);
+    ctx.fillRect(-2 * dpr, -2 * dpr, 4 * dpr, 10 * dpr);
     ctx.fillStyle = '#ffe08a';
     ctx.beginPath();
-    ctx.arc(hx, hz, 3.5, 0, Math.PI * 2);
+    ctx.moveTo(0, -10 * dpr);
+    ctx.lineTo(-5 * dpr, 6 * dpr);
+    ctx.lineTo(5 * dpr, 6 * dpr);
+    ctx.closePath();
     ctx.fill();
 
     ctx.restore();
 
-    // Fixed heading arrow + range label
+    // Compass rose — North moves opposite heading so it stays world-correct
+    const nAng = -headingRad - Math.PI / 2;
+    const nR = 13 * dpr;
+    const nx = cx + Math.cos(nAng) * nR;
+    const ny = cy + Math.sin(nAng) * nR;
     ctx.fillStyle = '#ff6b4a';
     ctx.beginPath();
-    ctx.moveTo(cx, cy - 9);
-    ctx.lineTo(cx - 5, cy + 6);
-    ctx.lineTo(cx + 5, cy + 6);
+    ctx.moveTo(nx, ny - 6 * dpr);
+    ctx.lineTo(nx - 4 * dpr, ny + 4 * dpr);
+    ctx.lineTo(nx + 4 * dpr, ny + 4 * dpr);
     ctx.closePath();
     ctx.fill();
-
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.font = 'bold 9px Nunito, Vazirmatn, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = font(9);
     ctx.textAlign = 'center';
-    ctx.fillText('N', cx, 12);
+    ctx.fillText('N', nx, ny + 14 * dpr);
 
     ctx.fillStyle = 'rgba(147, 197, 253, 0.85)';
-    ctx.font = 'bold 8px Nunito, Vazirmatn, sans-serif';
-    ctx.fillText(`${Math.round(radarRange / 100) / 10}km`, cx, h - 6);
+    ctx.font = font(8);
+    ctx.fillText(`${Math.round(radarRange / 100) / 10}km`, cx, h - 6 * dpr);
   }
 }

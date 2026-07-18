@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="screen-orientation" content="any" />
   <title>PokyPlane — Arcade Flight Simulator</title>
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/favicon.png" />
@@ -15,15 +19,22 @@
   <div id="app">
     <canvas id="game-canvas"></canvas>
     <div id="fps-counter" class="hidden">FPS 60</div>
+    <button type="button" id="nav-back" class="nav-back hidden" data-i18n-title="back" title="Back" aria-label="Back">←</button>
 
     <!-- HUD overlay -->
     <div id="hud" class="hidden">
       <div class="hud-top">
-        <img src="/logo.png" alt="" class="hud-logo" width="120" height="34" aria-hidden="true" />
         <div class="hud-panel" id="hud-mode">FREE ROAM</div>
         <div class="hud-panel" id="hud-score"><span data-i18n="score">Score</span>: 0</div>
         <div class="hud-panel" id="hud-timer">00:00</div>
         <div class="hud-panel hidden" id="hud-mp">MP</div>
+      </div>
+      <div id="hud-chat" class="hud-chat hidden">
+        <div id="hud-chat-log" class="hud-chat-log" aria-live="polite"></div>
+        <div class="hud-chat-row">
+          <input type="text" id="hud-chat-input" maxlength="120" data-i18n-placeholder="chatPlaceholder" placeholder="Message…" autocomplete="off" />
+          <button type="button" id="hud-chat-send" class="hud-chat-send" data-i18n="chatSend">Send</button>
+        </div>
       </div>
       <div class="hud-center">
         <div id="objective"></div>
@@ -84,6 +95,14 @@
       <div id="damage-vignette"></div>
     </div>
 
+    <!-- Force landscape on phones -->
+    <div id="rotate-lock" class="hidden" aria-live="polite">
+      <div class="rotate-lock-card">
+        <div class="rotate-lock-icon" aria-hidden="true">📱↻</div>
+        <p data-i18n="rotateLandscape">Rotate your phone to landscape to fly</p>
+      </div>
+    </div>
+
     <!-- Main Menu -->
     <div id="menu" class="screen">
       <div class="menu-bg"></div>
@@ -129,6 +148,10 @@
             <option value="volcanic">Ember Crater</option>
           </select>
         </label>
+        <p class="world-seed-line">
+          <span data-i18n="worldSeed">World seed</span>:
+          <code id="menu-world-seed">—</code>
+        </p>
         <nav class="menu-nav">
           <button type="button" class="menu-btn primary" data-action="start-freeroam" data-i18n="freeRoam">Free Roam</button>
           <button type="button" class="menu-btn" data-action="start-race" data-i18n="ringRace">Ring Race</button>
@@ -152,17 +175,38 @@
         <h2 data-i18n="multiplayerLobby">Multiplayer Lobby</h2>
         <p class="panel-desc" data-i18n="shareHint">Send this link to a friend — they join the same sky.</p>
 
-        <div id="mp-host-settings" class="mp-box hidden" aria-hidden="true"></div>
-
         <div class="mp-actions" style="margin-top:0.75rem">
           <button type="button" class="menu-btn primary" data-action="mp-host-open" data-i18n="hostMatch">Host a Match</button>
         </div>
         <div id="mp-host-box" class="mp-box hidden">
           <p id="mp-status" class="mp-status"></p>
+          <p class="hint mp-stay-hint" data-i18n="stayOnLobby">Stay on this screen until your friend joins</p>
           <code id="mp-room-code" class="mp-code"></code>
           <div class="mp-row">
             <input type="text" id="mp-invite-url" readonly />
             <button type="button" class="menu-btn" data-action="mp-copy" data-i18n="copyLink">Copy Invite Link</button>
+          </div>
+
+          <div id="mp-lobby-panel" class="mp-lobby-panel">
+            <div class="mp-players">
+              <h3 class="mp-section-title" data-i18n="mpPlayers">Players</h3>
+              <ul id="mp-player-list" class="mp-player-list"></ul>
+            </div>
+            <div id="mp-host-controls" class="mp-host-controls hidden">
+              <button type="button" class="menu-btn" data-action="mp-edit-settings" data-i18n="editHostSettings">Edit settings</button>
+              <button type="button" class="menu-btn danger" data-action="mp-kick" id="mp-kick-btn" disabled data-i18n="kick">Kick</button>
+              <button type="button" class="menu-btn primary" data-action="mp-start" id="mp-start-btn" disabled data-i18n="startMatch">Start match</button>
+            </div>
+            <p id="mp-guest-wait" class="hint hidden" data-i18n="waitingHostStart">Waiting for host to start…</p>
+          </div>
+
+          <div class="mp-chat">
+            <h3 class="mp-section-title" data-i18n="chat">Chat</h3>
+            <div id="mp-chat-log" class="mp-chat-log" aria-live="polite"></div>
+            <div class="mp-chat-row">
+              <input type="text" id="mp-chat-input" maxlength="120" data-i18n-placeholder="chatPlaceholder" placeholder="Message…" autocomplete="off" />
+              <button type="button" class="menu-btn" data-action="mp-chat-send" data-i18n="chatSend">Send</button>
+            </div>
           </div>
         </div>
         <hr class="panel-hr" />
@@ -425,23 +469,26 @@
               </label>
               <p class="setting-note" data-i18n="airportSpawnNote">Each new terrain chunk may spawn a landing strip. Also affects random spawn location.</p>
 
-              <h3 class="settings-subhead" data-i18n="controls">Controls</h3>
-              <p class="setting-note" data-i18n="keybindHint">Click a key to rebind. Avoid Ctrl — browsers use Ctrl+W to close tabs.</p>
-              <div class="keybind-grid" id="keybind-grid">
-                <div class="keybind-row"><span data-i18n="keyThrottleUp">Speed up</span><button type="button" class="keybind-btn" data-bind="throttleUp"></button></div>
-                <div class="keybind-row"><span data-i18n="keyThrottleDown">Slow down / brake</span><button type="button" class="keybind-btn" data-bind="throttleDown"></button></div>
-                <div class="keybind-row"><span data-i18n="keyBoost">Boost</span><button type="button" class="keybind-btn" data-bind="boost"></button></div>
-                <div class="keybind-row"><span data-i18n="keyPitchUp">Pitch up (dive)</span><button type="button" class="keybind-btn" data-bind="pitchUp"></button></div>
-                <div class="keybind-row"><span data-i18n="keyPitchDown">Pitch down (climb)</span><button type="button" class="keybind-btn" data-bind="pitchDown"></button></div>
-                <div class="keybind-row"><span data-i18n="keyTurnLeft">Turn left</span><button type="button" class="keybind-btn" data-bind="turnLeft"></button></div>
-                <div class="keybind-row"><span data-i18n="keyTurnRight">Turn right</span><button type="button" class="keybind-btn" data-bind="turnRight"></button></div>
-                <div class="keybind-row"><span data-i18n="keyRollLeft">Roll left</span><button type="button" class="keybind-btn" data-bind="rollLeft"></button></div>
-                <div class="keybind-row"><span data-i18n="keyRollRight">Roll right</span><button type="button" class="keybind-btn" data-bind="rollRight"></button></div>
-                <div class="keybind-row"><span data-i18n="keyFire">Fire</span><button type="button" class="keybind-btn" data-bind="fire"></button></div>
-                <div class="keybind-row"><span data-i18n="keyCamera">Cycle camera</span><button type="button" class="keybind-btn" data-bind="camera"></button></div>
-                <div class="keybind-row"><span data-i18n="keyPause">Pause</span><button type="button" class="keybind-btn" data-bind="pause"></button></div>
+              <div class="keybind-section" id="keybind-section">
+                <h3 class="settings-subhead" data-i18n="controls">Controls</h3>
+                <p class="setting-note keybind-touch-note hidden" data-i18n="keybindTouchNote">On phones, use the on-screen stick and buttons. Keyboard remapping is optional.</p>
+                <p class="setting-note" data-i18n="keybindHint">Click a key to rebind. Avoid Ctrl — browsers use Ctrl+W to close tabs.</p>
+                <div class="keybind-grid" id="keybind-grid">
+                  <div class="keybind-row"><span data-i18n="keyThrottleUp">Speed up</span><button type="button" class="keybind-btn" data-bind="throttleUp"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyThrottleDown">Slow down / brake</span><button type="button" class="keybind-btn" data-bind="throttleDown"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyBoost">Boost</span><button type="button" class="keybind-btn" data-bind="boost"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyPitchUp">Pitch up (dive)</span><button type="button" class="keybind-btn" data-bind="pitchUp"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyPitchDown">Pitch down (climb)</span><button type="button" class="keybind-btn" data-bind="pitchDown"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyTurnLeft">Turn left</span><button type="button" class="keybind-btn" data-bind="turnLeft"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyTurnRight">Turn right</span><button type="button" class="keybind-btn" data-bind="turnRight"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyRollLeft">Roll left</span><button type="button" class="keybind-btn" data-bind="rollLeft"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyRollRight">Roll right</span><button type="button" class="keybind-btn" data-bind="rollRight"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyFire">Fire</span><button type="button" class="keybind-btn" data-bind="fire"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyCamera">Cycle camera</span><button type="button" class="keybind-btn" data-bind="camera"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyPause">Pause</span><button type="button" class="keybind-btn" data-bind="pause"></button></div>
+                </div>
+                <button type="button" class="menu-btn keybind-reset" data-action="keybind-reset" data-i18n="keybindReset">Reset keys to default</button>
               </div>
-              <button type="button" class="menu-btn keybind-reset" data-action="keybind-reset" data-i18n="keybindReset">Reset keys to default</button>
             </div>
 
             <!-- ADVANCED: Language + Announcement -->
@@ -499,12 +546,23 @@
       </div>
     </div>
 
-    <!-- Touch controls (mobile) -->
-    <div id="touch" class="hidden">
+    <!-- Touch controls (mobile) — shown only while playing -->
+    <div id="touch" class="hidden" aria-hidden="true">
+      <button type="button" id="touch-pause" class="touch-pause" data-i18n="pauseShort" aria-label="Pause">II</button>
       <div class="stick" id="stick-move"><div class="stick-knob"></div></div>
       <div class="touch-btns">
-        <button type="button" id="touch-throttle" data-i18n="thr">THR</button>
-        <button type="button" id="touch-fire" data-i18n="fire">FIRE</button>
+        <div class="touch-btn-row">
+          <button type="button" id="touch-camera" class="touch-btn secondary" data-i18n="cam">CAM</button>
+          <button type="button" id="touch-weapon" class="touch-btn secondary" data-i18n="wpn">WPN</button>
+        </div>
+        <div class="touch-btn-row">
+          <button type="button" id="touch-brake" class="touch-btn secondary" data-i18n="brk">BRK</button>
+          <button type="button" id="touch-boost" class="touch-btn boost" data-i18n="bst">BST</button>
+        </div>
+        <div class="touch-btn-row touch-btn-row-main">
+          <button type="button" id="touch-throttle" class="touch-btn" data-i18n="thr">THR</button>
+          <button type="button" id="touch-fire" class="touch-btn fire" data-i18n="fire">FIRE</button>
+        </div>
       </div>
     </div>
 

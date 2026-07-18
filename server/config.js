@@ -2,13 +2,20 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const isProd = process.env.NODE_ENV === 'production';
+
 export const config = {
-  port: Number(process.env.PORT || 7777),
+  // Liara injects PORT=3000; default to 3000 in production so health checks pass
+  port: Number(process.env.PORT || (isProd ? 3000 : 7777)),
   nodeEnv: process.env.NODE_ENV || 'development',
-  clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost',
+  clientOrigin:
+    process.env.CLIENT_ORIGIN ||
+    (isProd ? undefined : 'http://localhost'),
   databaseUrl:
     process.env.DATABASE_URL ||
-    'postgresql://pokyplane:pokyplane_secret@localhost:5444/pokyplane',
+    (isProd
+      ? undefined
+      : 'postgresql://pokyplane:pokyplane_secret@localhost:5444/pokyplane'),
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET || 'dev-access-secret-change-me!!',
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-me!!',

@@ -22,13 +22,16 @@ import {
   snapViewDistanceKm,
 } from './settings.js';
 import { Matchmaking, getRoomFromUrl, clearRoomFromUrl } from './matchmaking.js';
+import { MpHub } from './mpHub.js';
 import { WeaponSystem, WEAPON_ORDER, WEAPON_DEFS, DEFAULT_WEAPON_FLAGS, isExplosiveWeapon } from './weapons.js';
 import { FuelPickups } from './fuel.js';
-import { setupAuthUI, isLoggedIn } from './authUi.js';
+import { setupAuthUI, isLoggedIn, getUser, openAuthModal } from './authUi.js';
 import { fetchAnnouncement } from './api.js';
 import { submitScore } from './api.js';
+import { makeNameTag, setNameTagText, disposeNameTag } from './nameTag.js';
 import { startPresenceLoop, stopPresenceLoop } from './presence.js';
 import { MAPS, getMap, getMapWind, mapLabel } from './maps.js';
+import { randomWorldSeed } from './noise.js';
 import { pickSpawnAirport, runwaySpawnPose } from './airports.js';
 import {
   DEFAULT_KEY_BINDINGS,
@@ -44,10 +47,11 @@ let settings = loadSettings();
 
 const canvas = document.getElementById('game-canvas');
 const launchMax = normalizeQuality(settings.quality) === 'max';
+// Prefer discrete / high-perf GPU (incl. mobile Adreno/Mali) — low-power often sticks to weak iGPU.
 const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: launchMax,
-  powerPreference: launchMax ? 'high-performance' : 'low-power',
+  powerPreference: 'high-performance',
   failIfMajorPerformanceCaveat: false,
 });
 renderer.setPixelRatio(1);
@@ -63,14 +67,18 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 
 const sound = new SoundEngine();
 const match = new Matchmaking();
+const mpHub = new MpHub(match);
 const input = new Input();
 const hud = new HUD();
 const camRig = new CameraManager(camera);
 let weapons = null;
 
 let selectedMapId = localStorage.getItem('pokyplane_map') || 'meadow';
+/** Session world seed — regenerated each flight (synced via MP lobby). */
+let sessionWorldSeed = randomWorldSeed();
 let mpLobby = {
   mapId: selectedMapId,
+  worldSeed: sessionWorldSeed,
   mode: 'dogfight',
   difficulty: 'normal',
   maxPlayers: 2,
@@ -83,6 +91,11 @@ let mpLobby = {
   enabledPlanes: PLANE_TYPES.map(() => true),
   spawnAirportId: 'main',
 };
+
+function syncWorldSeedUi(seed = sessionWorldSeed) {
+  const el = document.getElementById('menu-world-seed');
+  if (el) el.textContent = String(seed >>> 0);
+}
 
 function defaultEnabledPlanes() {
   return PLANE_TYPES.map(() => true);
@@ -141,6 +154,7 @@ let menuPlane = null;
 let menuParts = null;
 let remotePlane = null;
 let remoteParts = null;
+let remoteNameTag = null;
 let remoteInterp = {
   pos: new THREE.Vector3(),
   quat: new THREE.Quaternion(),
@@ -149,14 +163,26 @@ let remoteInterp = {
   health: 100,
   throttle: 0.5,
   skin: 0,
+  _gotState: false,
 };
+let localMpName = 'Pilot';
+let mpPeerName = '';
+let mpGuestConnected = false;
+let mpEditingSettings = false;
+const mpChatHistory = [];
+const MP_CHAT_MAX = 40;
 
 const _aimOrigin = new THREE.Vector3();
 const _aimDir = new THREE.Vector3();
 const _aimWorld = new THREE.Vector3();
+const _aimSmooth = new THREE.Vector3();
 const _aimProj = new THREE.Vector3();
 const targetLock = new TargetLockSystem();
 let _prevLockId = null;
+let _aimSmoothReady = false;
+let _assistStickyId = null;
+let _assistStickyKind = null;
+let _lockHeldActive = false;
 
 let state = 'menu';
 let gameMode = 'freeroam';
@@ -197,6 +223,111 @@ function syncWorldVisibility() {
   input.setGameActive(state === 'playing' || state === 'paused');
 }
 
+function syncTouchUi() {
+  input.setTouchVisible(state === 'playing');
+  syncOrientationLock();
+}
+
+function isPortrait() {
+  return window.matchMedia('(orientation: portrait)').matches;
+}
+
+async function tryLockLandscape() {
+  try {
+    const orient = screen.orientation;
+    if (orient?.lock) {
+      await orient.lock('landscape');
+    }
+  } catch {
+    // Browsers often require fullscreen; overlay still guides the user
+  }
+}
+
+async function tryEnterFullscreen() {
+  if (!input.isTouchUi) return;
+  const root = document.getElementById('app') || document.documentElement;
+  const active =
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    document.msFullscreenElement;
+  if (active) return;
+  try {
+    if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+    else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+    else if (root.msRequestFullscreen) root.msRequestFullscreen();
+  } catch {
+    /* user gesture / policy may block */
+  }
+}
+
+function syncOrientationLock() {
+  if (!input.isTouchUi) return;
+
+  // Main menu: portrait OK. Everything else: force landscape.
+  const onMainMenu = state === 'menu' && !menuEl?.classList.contains('hidden');
+  const needsLandscape = !onMainMenu;
+
+  document.body.classList.toggle('force-landscape', needsLandscape);
+  document.body.classList.toggle('menu-portrait-ok', onMainMenu);
+
+  const locked = needsLandscape && isPortrait();
+  document.body.classList.toggle('portrait-locked', locked);
+  const el = document.getElementById('rotate-lock');
+  el?.classList.toggle('hidden', !locked);
+
+  tryEnterFullscreen();
+  if (needsLandscape && !locked) {
+    tryLockLandscape();
+  }
+}
+
+function syncNavBack() {
+  const btn = document.getElementById('nav-back');
+  if (!btn) return;
+  const onOptions = !optionsEl?.classList.contains('hidden');
+  const onMp = !mpEl?.classList.contains('hidden');
+  const onPause = !pauseEl?.classList.contains('hidden');
+  const onResults = !resultsEl?.classList.contains('hidden');
+  const hostModal = !document.getElementById('mp-host-modal')?.classList.contains('hidden');
+  const visible =
+    input.isTouchUi &&
+    (onOptions || onMp || onPause || onResults || hostModal) &&
+    state !== 'playing';
+  btn.classList.toggle('hidden', !visible);
+}
+
+function navigateBack() {
+  const hostModal = document.getElementById('mp-host-modal');
+  if (hostModal && !hostModal.classList.contains('hidden')) {
+    closeHostModal();
+    syncNavBack();
+    return;
+  }
+  if (!optionsEl?.classList.contains('hidden')) {
+    showScreen(state === 'paused' ? 'pause' : 'menu');
+    return;
+  }
+  if (!mpEl?.classList.contains('hidden')) {
+    showScreen('menu');
+    return;
+  }
+  if (!pauseEl?.classList.contains('hidden')) {
+    state = 'playing';
+    showScreen('none');
+    return;
+  }
+  if (!resultsEl?.classList.contains('hidden')) {
+    quitToMenu();
+    return;
+  }
+  if (state === 'playing') {
+    state = 'paused';
+    showScreen('pause');
+    return;
+  }
+  showScreen('menu');
+}
+
 function showScreen(id) {
   [menuEl, optionsEl, pauseEl, resultsEl, mpEl].forEach((el) => el?.classList.add('hidden'));
   if (id === 'menu') menuEl?.classList.remove('hidden');
@@ -205,6 +336,20 @@ function showScreen(id) {
   if (id === 'results') resultsEl?.classList.remove('hidden');
   if (id === 'multiplayer') mpEl?.classList.remove('hidden');
   syncWorldVisibility();
+  syncTouchUi();
+  syncOrientationLock();
+  syncNavBack();
+  tryEnterFullscreen();
+
+  // History stack so Android back uses in-app navigation
+  if (id && id !== 'none') {
+    try {
+      const cur = history.state?.screen;
+      if (cur !== id) history.pushState({ screen: id, gameState: state }, '');
+    } catch {
+      /* */
+    }
+  }
 }
 
 async function unlockAudio() {
@@ -263,16 +408,24 @@ function destroyWorld() {
   world = null;
 }
 
-function ensureWorld(mapId = selectedMapId) {
+function ensureWorld(mapId = selectedMapId, worldSeed = null) {
+  const seed =
+    worldSeed != null
+      ? worldSeed >>> 0
+      : sessionWorldSeed != null
+        ? sessionWorldSeed >>> 0
+        : randomWorldSeed();
+  sessionWorldSeed = seed;
   if (!weapons) weapons = new WeaponSystem(scene);
   if (!world) {
-    world = new World(scene, settings.quality, mapId);
+    world = new World(scene, settings.quality, mapId, seed);
     particles = new ParticleSystem(scene);
-  } else if (world.mapId !== mapId) {
-    world.rebuild(mapId, settings.quality);
+  } else if (world.mapId !== mapId || world.worldSeed !== seed) {
+    world.rebuild(mapId, settings.quality, seed);
   }
   selectedMapId = mapId;
   localStorage.setItem('pokyplane_map', mapId);
+  syncWorldSeedUi(seed);
   applySettingsEffects();
 }
 
@@ -323,21 +476,39 @@ function spawnPlayerPlane() {
   syncShadowCasters();
 }
 
-function spawnRemotePlane(skin = 1) {
-  if (remotePlane) scene.remove(remotePlane);
+function spawnRemotePlane(skin = 1, seedPos = null) {
+  if (remotePlane) {
+    disposeNameTag(remoteNameTag);
+    remoteNameTag = null;
+    scene.remove(remotePlane);
+  }
   const built = createPlane(skin);
   remotePlane = built.group;
   remoteParts = built.parts;
-  remotePlane.position.set(20, 20, -20);
+  const p = seedPos || { x: 24, y: 28, z: -24 };
+  remotePlane.position.set(p.x, p.y, p.z);
+  remoteInterp.pos.set(p.x, p.y, p.z);
+  remoteInterp.targetPos.set(p.x, p.y, p.z);
+  remoteNameTag = makeNameTag(mpPeerName || t('mpGuest'));
+  remotePlane.add(remoteNameTag);
   scene.add(remotePlane);
 }
 
 function clearRemotePlane() {
   if (remotePlane) {
+    disposeNameTag(remoteNameTag);
+    remoteNameTag = null;
     scene.remove(remotePlane);
     remotePlane = null;
     remoteParts = null;
   }
+  remoteInterp._gotState = false;
+  remoteInterp.health = 100;
+}
+
+function refreshRemoteNameTag() {
+  if (!remoteNameTag || !mpPeerName) return;
+  setNameTagText(remoteNameTag, mpPeerName);
 }
 
 function clearModes() {
@@ -348,13 +519,29 @@ function clearModes() {
   fuelDrops?.clear();
   targetLock.clear();
   _prevLockId = null;
+  _aimSmoothReady = false;
+  _assistStickyId = null;
+  _assistStickyKind = null;
+  _lockHeldActive = false;
 }
 
 function startGame(mode, mapOverride = null) {
   const mapId = mapOverride || selectedMapId || document.getElementById('menu-map')?.value || 'meadow';
-  ensureWorld(mapId);
+
+  // New random world each solo flight; MP uses lobby seed (host generates once).
+  if (mode === 'multiplayer') {
+    if (mpLobby.worldSeed == null) {
+      mpLobby.worldSeed = randomWorldSeed();
+    }
+    sessionWorldSeed = mpLobby.worldSeed >>> 0;
+  } else {
+    sessionWorldSeed = randomWorldSeed();
+  }
+
+  ensureWorld(mapId, sessionWorldSeed);
   world?.setTimeOfDay(0.22);
   clearModes();
+  hud.toast(`${t('worldSeed')}: ${sessionWorldSeed}`, 2200);
   weapons?.clear();
   gameMode = mode;
   state = 'playing';
@@ -430,8 +617,13 @@ function startGame(mode, mapOverride = null) {
   camRig.snapTo(flight);
 
   if (mode === 'multiplayer') {
-    spawnRemotePlane(remoteInterp.skin);
+    const seed = MpHub.seedRemotePose(
+      { x: spawnInfo.x, y: spawnInfo.y + 10, z: spawnInfo.z },
+      match.role
+    );
+    spawnRemotePlane(remoteInterp.skin, seed);
     document.getElementById('hud-mp')?.classList.remove('hidden');
+    mpHub.markLocalReady();
   } else {
     clearRemotePlane();
     document.getElementById('hud-mp')?.classList.add('hidden');
@@ -439,6 +631,9 @@ function startGame(mode, mapOverride = null) {
 
   showScreen('none');
   syncWorldVisibility();
+  syncOrientationLock();
+  tryLockLandscape();
+  tryEnterFullscreen();
   hud.show(true);
   sound.stopAmbient();
   sound.startEngine();
@@ -510,6 +705,7 @@ function quitToMenu() {
   stopPresenceLoop();
   clearModes();
   clearRemotePlane();
+  document.getElementById('hud-chat')?.classList.add('hidden');
   sound.stopEngine();
   sound.setStall(false);
   sound.startAmbient();
@@ -794,13 +990,147 @@ function readHostModal() {
   };
 }
 
-function openHostModal() {
+function openHostModal(editing = false) {
+  mpEditingSettings = !!editing && match.role === 'host';
   fillHostModal();
+  const submit = document.querySelector('#mp-host-modal [data-action="mp-host"]');
+  if (submit) {
+    submit.setAttribute('data-i18n', mpEditingSettings ? 'applyHostSettings' : 'startHosting');
+    submit.textContent = t(mpEditingSettings ? 'applyHostSettings' : 'startHosting');
+  }
   document.getElementById('mp-host-modal')?.classList.remove('hidden');
+  syncNavBack();
+  syncOrientationLock();
 }
 
 function closeHostModal() {
   document.getElementById('mp-host-modal')?.classList.add('hidden');
+  mpEditingSettings = false;
+  syncNavBack();
+  syncOrientationLock();
+}
+
+function localDisplayName() {
+  const u = getUser();
+  return (u?.displayName || u?.username || 'Pilot').slice(0, 24);
+}
+
+function requireMpLogin() {
+  if (isLoggedIn()) {
+    localMpName = localDisplayName();
+    return true;
+  }
+  hud.toast(t('loginRequiredMp'));
+  openAuthModal();
+  return false;
+}
+
+function sendMpHello() {
+  localMpName = localDisplayName();
+  match.sendEvent({ type: 'hello', name: localMpName });
+}
+
+function appendChatMessage(name, text, self = false) {
+  const cleanName = String(name || 'Pilot').slice(0, 24);
+  const cleanText = String(text || '').trim().slice(0, 120);
+  if (!cleanText) return;
+  const entry = { name: cleanName, text: cleanText, self: !!self, t: Date.now() };
+  mpChatHistory.push(entry);
+  while (mpChatHistory.length > MP_CHAT_MAX) mpChatHistory.shift();
+  renderChatLogs();
+}
+
+function renderChatLogs() {
+  const renderInto = (el, limit) => {
+    if (!el) return;
+    const slice = mpChatHistory.slice(-limit);
+    el.innerHTML = slice
+      .map(
+        (m) =>
+          `<div class="chat-line${m.self ? ' self' : ''}"><strong>${escapeHtml(m.name)}</strong>: ${escapeHtml(m.text)}</div>`
+      )
+      .join('');
+    el.scrollTop = el.scrollHeight;
+  };
+  renderInto(document.getElementById('mp-chat-log'), 30);
+  renderInto(document.getElementById('hud-chat-log'), 6);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function sendChatFromInput(inputEl) {
+  if (!match.isConnected) return;
+  const text = (inputEl?.value || '').trim().slice(0, 120);
+  if (!text) return;
+  const name = localDisplayName();
+  match.sendEvent({ type: 'chat', name, text });
+  appendChatMessage(name, text, true);
+  if (inputEl) inputEl.value = '';
+}
+
+function syncMpLobbyUi() {
+  const hostControls = document.getElementById('mp-host-controls');
+  const guestWait = document.getElementById('mp-guest-wait');
+  const startBtn = document.getElementById('mp-start-btn');
+  const kickBtn = document.getElementById('mp-kick-btn');
+  const list = document.getElementById('mp-player-list');
+  const isHost = match.role === 'host';
+  const connected = match.isConnected || mpGuestConnected;
+
+  hostControls?.classList.toggle('hidden', !isHost || match.status === 'idle');
+  guestWait?.classList.toggle('hidden', isHost || !connected || state === 'playing');
+  if (startBtn) startBtn.disabled = !isHost || !connected;
+  if (kickBtn) kickBtn.disabled = !isHost || !connected;
+
+  if (list) {
+    const you = localDisplayName();
+    const peer = mpPeerName || (connected ? t('mpGuest') : '—');
+    const rows = [];
+    if (isHost) {
+      rows.push(`<li><span class="mp-role">${t('mpHost')}</span> ${escapeHtml(you)} <em>(${t('mpYou')})</em></li>`);
+      rows.push(
+        `<li><span class="mp-role">${t('mpGuest')}</span> ${connected ? escapeHtml(peer) : '—'}</li>`
+      );
+    } else if (match.role === 'guest') {
+      rows.push(`<li><span class="mp-role">${t('mpHost')}</span> ${escapeHtml(peer || '—')}</li>`);
+      rows.push(`<li><span class="mp-role">${t('mpGuest')}</span> ${escapeHtml(you)} <em>(${t('mpYou')})</em></li>`);
+    } else {
+      list.innerHTML = '';
+      return;
+    }
+    list.innerHTML = rows.join('');
+  }
+
+  const hudMp = document.getElementById('hud-mp');
+  if (hudMp && gameMode === 'multiplayer') {
+    hudMp.textContent = mpPeerName ? `MP · ${mpPeerName}` : 'MP';
+  }
+}
+
+function resetMpLobbyState() {
+  mpGuestConnected = false;
+  mpPeerName = '';
+  mpEditingSettings = false;
+  syncMpLobbyUi();
+}
+
+function applyHostSettingsFromModal() {
+  mpLobby = { ...mpLobby, ...readHostModal() };
+  if (mpLobby.worldSeed == null) mpLobby.worldSeed = randomWorldSeed();
+  sessionWorldSeed = mpLobby.worldSeed;
+  syncWorldSeedUi(sessionWorldSeed);
+  if (match.role === 'host' && (match.status === 'hosting' || match.isConnected)) {
+    ensureWorld(mpLobby.mapId, mpLobby.worldSeed);
+    mpHub.publishLobby({ ...mpLobby });
+    hud.toast(t('applyHostSettings'));
+  }
+  closeHostModal();
 }
 
 // ----- Matchmaking UI -----
@@ -813,7 +1143,7 @@ function updateMpStatus(info) {
 
   if (info.status === 'hosting') {
     box?.classList.remove('hidden');
-    statusEl.textContent = t('waitingPeer');
+    statusEl.textContent = mpGuestConnected ? t('peerInLobby') : t('waitingPeer');
     if (codeEl) codeEl.textContent = info.roomId || '';
     if (urlEl) urlEl.value = info.inviteUrl || '';
   } else if (info.status === 'connecting') {
@@ -821,31 +1151,82 @@ function updateMpStatus(info) {
     statusEl.textContent = t('connecting');
   } else if (info.status === 'connected') {
     box?.classList.remove('hidden');
+    mpGuestConnected = true;
     statusEl.textContent = t('connected');
   } else if (info.status === 'error') {
     statusEl.textContent = 'Connection error';
+  } else if (info.status === 'idle') {
+    statusEl.textContent = '';
+    resetMpLobbyState();
   }
+  syncMpLobbyUi();
 }
 
 match.onStatus = updateMpStatus;
 
 match.onPeerState = (data) => {
   if (!data) return;
+  if (!remoteInterp._gotState) {
+    remoteInterp._gotState = true;
+    remoteInterp.pos.set(data.x, data.y, data.z);
+  }
   remoteInterp.targetPos.set(data.x, data.y, data.z);
   remoteInterp.targetQuat.set(data.qx, data.qy, data.qz, data.qw);
   remoteInterp.health = data.health ?? 100;
   remoteInterp.throttle = data.throttle ?? 0.5;
+  if (data.name && data.name !== mpPeerName) {
+    mpPeerName = String(data.name).slice(0, 24);
+    refreshRemoteNameTag();
+    syncMpLobbyUi();
+  }
   if (data.skin != null && data.skin !== remoteInterp.skin && remotePlane) {
     remoteInterp.skin = data.skin;
-    spawnRemotePlane(data.skin);
+    spawnRemotePlane(data.skin, {
+      x: data.x,
+      y: data.y,
+      z: data.z,
+    });
   }
 };
 
+function beginMultiplayerMatch(mapId) {
+  if (state === 'playing' && gameMode === 'multiplayer') return;
+  document.getElementById('hud-chat')?.classList.remove('hidden');
+  startGame('multiplayer', mapId || mpLobby.mapId);
+}
+
 match.onEvent = (ev) => {
+  if (ev.type === 'hello') {
+    mpPeerName = String(ev.name || '').slice(0, 24) || t('mpGuest');
+    refreshRemoteNameTag();
+    syncMpLobbyUi();
+    return;
+  }
+  if (ev.type === 'chat') {
+    appendChatMessage(ev.name, ev.text, false);
+    return;
+  }
+  if (ev.type === 'kick') {
+    hud.toast(t('kicked'));
+    match.destroy();
+    resetMpLobbyState();
+    clearRoomFromUrl();
+    quitToMenu();
+    document.getElementById('mp-host-box')?.classList.add('hidden');
+    showScreen('multiplayer');
+    return;
+  }
+  if (ev.type === 'start') {
+    if (state === 'playing' || state === 'paused') return;
+    beginMultiplayerMatch(mpLobby.mapId);
+    return;
+  }
   if (ev.type === 'lobby') {
     mpLobby = {
       ...mpLobby,
       ...ev.config,
+      worldSeed:
+        ev.config?.worldSeed != null ? ev.config.worldSeed >>> 0 : mpLobby.worldSeed,
       weaponFlags: { ...DEFAULT_WEAPON_FLAGS, ...(ev.config?.weaponFlags || {}) },
       enabledPlanes: ev.config?.enabledPlanes?.length
         ? ev.config.enabledPlanes
@@ -855,33 +1236,78 @@ match.onEvent = (ev) => {
       ),
       maxPlayers: clampMaxPlayers(ev.config?.maxPlayers ?? mpLobby.maxPlayers),
     };
+    if (mpLobby.worldSeed != null) sessionWorldSeed = mpLobby.worldSeed >>> 0;
     weapons?.setEnabled(mpLobby.weaponFlags);
-    if (match.role === 'guest' && state !== 'playing') {
-      startGame('multiplayer', mpLobby.mapId);
-    } else {
-      ensureWorld(mpLobby.mapId);
+    mpHub.setConfig(mpLobby);
+
+    if (state === 'playing' || state === 'paused') return;
+
+    ensureWorld(mpLobby.mapId, mpLobby.worldSeed);
+    // Guest stays in lobby until host Start
+    if (match.role === 'guest') {
+      document.getElementById('mp-status').textContent = t('waitingHostStart');
+      syncMpLobbyUi();
     }
     return;
   }
+  if (ev.type === 'ready') {
+    mpHub.handleRemoteReady();
+    return;
+  }
   if (ev.type === 'peer-joined') {
-    hud.toast(t('peerJoined'));
-    sound.playUI('success');
     if (match.role === 'host') {
-      ensureWorld(mpLobby.mapId);
+      hud.toast(t('peerJoined'));
+      sound.playUI('success');
+    }
+    mpGuestConnected = true;
+    sendMpHello();
+    if (match.role === 'host') {
+      mpHub.reset();
+      mpHub.onBothReady(() => {
+        /* load sync only — match start is host Start button */
+      });
+      if (mpLobby.worldSeed == null) mpLobby.worldSeed = randomWorldSeed();
+      ensureWorld(mpLobby.mapId, mpLobby.worldSeed);
       const pre = resolveSpawn(world, {
         role: 'host',
         randomChance: mpLobby.airportSpawnChance,
       });
       mpLobby.spawnAirportId = pre.airportId;
-      match.sendEvent({ type: 'lobby', config: { ...mpLobby } });
-      startGame('multiplayer', mpLobby.mapId);
+      mpHub.publishLobby({ ...mpLobby });
+      document.getElementById('mp-status').textContent = t('peerInLobby');
+    } else {
+      document.getElementById('mp-status').textContent = t('waitingHostStart');
     }
-    // Guest waits for lobby packet
+    syncMpLobbyUi();
   } else if (ev.type === 'peer-left') {
-    hud.toast(t('peerLeft'));
-    if (gameMode === 'multiplayer' && state === 'playing') {
+    const skipToast = !!match._kicking;
+    match._kicking = false;
+    if (!skipToast) hud.toast(t('peerLeft'));
+    mpHub.reset();
+    mpGuestConnected = false;
+    mpPeerName = '';
+    syncMpLobbyUi();
+    const inMatch =
+      gameMode === 'multiplayer' && (state === 'playing' || state === 'paused');
+    if (inMatch) {
       endGame(t('youWin'), t('peerLeft'));
+    } else if (match.role === 'guest') {
+      match.destroy();
+      resetMpLobbyState();
+      clearRoomFromUrl();
+      document.getElementById('mp-host-box')?.classList.add('hidden');
+      showScreen('multiplayer');
+    } else if (match.role === 'host') {
+      document.getElementById('mp-status').textContent = t('waitingPeer');
     }
+  } else if (ev.type === 'damage') {
+    if (state !== 'playing' || gameMode !== 'multiplayer') return;
+    const mods = difficultyMods(mpLobby.difficulty);
+    const amt = (Number(ev.amount) || 0) * mods.damageScale;
+    if (amt <= 0) return;
+    flight.takeDamage(amt);
+    if (settings.camShake) camRig.addShake(0.22);
+    sound.playUI('success');
   } else if (ev.type === 'fire') {
     if (!weapons) return;
     const origin = new THREE.Vector3(ev.x, ev.y, ev.z);
@@ -889,21 +1315,44 @@ match.onEvent = (ev) => {
     const wpn = ev.weapon || 'mg';
     if (WEAPON_DEFS[wpn]?.sound === 'rocket') sound.playRocket();
     else sound.playGunfire();
+    let lockTarget = null;
+    if (ev.lockId != null && ev.lockKind) {
+      // Sender locked 'peer' (you); remap so local homing resolves against self.
+      const kind = ev.lockKind === 'peer' ? 'self' : ev.lockKind;
+      lockTarget = { id: kind === 'self' ? 'self' : ev.lockId, kind };
+    }
     weapons.fire(origin, dir, {
       owner: 'remote',
       enemy: true,
-      rate: 0,
       force: true,
       weapon: wpn,
+      lockTarget,
     });
   } else if (ev.type === 'died') {
-    endGame(t('youWin'), t('peerLeft'));
+    if (
+      gameMode === 'multiplayer' &&
+      (state === 'playing' || state === 'paused')
+    ) {
+      endGame(t('youWin'), t('peerLeft'));
+    }
   }
 };
 
 async function hostMatch() {
+  if (!requireMpLogin()) return;
   await unlockAudio();
-  mpLobby = { ...mpLobby, ...readHostModal() };
+  if (mpEditingSettings || (match.role === 'host' && (match.status === 'hosting' || match.isConnected))) {
+    applyHostSettingsFromModal();
+    return;
+  }
+  mpHub.reset();
+  mpChatHistory.length = 0;
+  renderChatLogs();
+  resetMpLobbyState();
+  localMpName = localDisplayName();
+  mpLobby = { ...mpLobby, ...readHostModal(), worldSeed: randomWorldSeed(), spawnAirportId: null };
+  sessionWorldSeed = mpLobby.worldSeed;
+  syncWorldSeedUi(sessionWorldSeed);
   closeHostModal();
   try {
     const { inviteUrl, roomId } = await match.host();
@@ -911,13 +1360,15 @@ async function hostMatch() {
     document.getElementById('mp-room-code').textContent = roomId;
     document.getElementById('mp-invite-url').value = inviteUrl;
     document.getElementById('mp-status').textContent = t('waitingPeer');
+    syncMpLobbyUi();
   } catch (e) {
     console.error(e);
-    hud.toast('Host failed — check network');
+    hud.toast(t('hostFailed'));
   }
 }
 
 async function joinMatch(code) {
+  if (!requireMpLogin()) return;
   await unlockAudio();
   let room = (code || '').trim();
   if (room.includes('room=')) {
@@ -929,15 +1380,42 @@ async function joinMatch(code) {
     }
   }
   if (!room) return;
+  mpChatHistory.length = 0;
+  renderChatLogs();
+  resetMpLobbyState();
+  localMpName = localDisplayName();
   try {
     document.getElementById('mp-status').textContent = t('connecting');
     document.getElementById('mp-host-box')?.classList.remove('hidden');
     await match.join(room);
     clearRoomFromUrl();
+    document.getElementById('mp-status').textContent = t('waitingHostStart');
+    syncMpLobbyUi();
   } catch (e) {
     console.error(e);
-    hud.toast('Join failed');
+    const msg = e?.type === 'peer-unavailable' || /peer|connect/i.test(String(e?.message || e))
+      ? t('joinFailedHint')
+      : t('joinFailed');
+    hud.toast(msg);
   }
+}
+
+function hostStartMatch() {
+  if (match.role !== 'host' || !match.isConnected) return;
+  if (mpLobby.worldSeed == null) mpLobby.worldSeed = randomWorldSeed();
+  mpHub.publishLobby({ ...mpLobby });
+  mpHub.sendStart();
+  beginMultiplayerMatch(mpLobby.mapId);
+}
+
+function hostKickGuest() {
+  if (match.role !== 'host') return;
+  match.kickGuest();
+  mpGuestConnected = false;
+  mpPeerName = '';
+  hud.toast(t('peerLeft'));
+  document.getElementById('mp-status').textContent = t('waitingPeer');
+  syncMpLobbyUi();
 }
 
 // ----- Events -----
@@ -949,11 +1427,26 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
     if (action === 'start-freeroam') startGame('freeroam');
     if (action === 'start-race') startGame('race');
     if (action === 'start-combat') startGame('combat');
-    if (action === 'multiplayer') showScreen('multiplayer');
+    if (action === 'multiplayer') {
+      if (!requireMpLogin()) return;
+      showScreen('multiplayer');
+    }
     if (action === 'close-multiplayer') showScreen('menu');
-    if (action === 'mp-host-open') openHostModal();
+    if (action === 'mp-host-open') {
+      if (!requireMpLogin()) return;
+      openHostModal(false);
+    }
     if (action === 'mp-host-cancel') closeHostModal();
     if (action === 'mp-host') hostMatch();
+    if (action === 'mp-edit-settings') {
+      if (match.role !== 'host') return;
+      openHostModal(true);
+    }
+    if (action === 'mp-start') hostStartMatch();
+    if (action === 'mp-kick') hostKickGuest();
+    if (action === 'mp-chat-send') {
+      sendChatFromInput(document.getElementById('mp-chat-input'));
+    }
     if (action === 'mp-join') joinMatch(document.getElementById('mp-join-input')?.value);
     if (action === 'mp-copy') {
       const url = document.getElementById('mp-invite-url')?.value;
@@ -965,7 +1458,11 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
     if (action === 'mp-disconnect') {
       await match.destroy();
       clearRoomFromUrl();
+      resetMpLobbyState();
+      mpChatHistory.length = 0;
+      renderChatLogs();
       document.getElementById('mp-host-box')?.classList.add('hidden');
+      document.getElementById('hud-chat')?.classList.add('hidden');
     }
     if (action === 'options' || action === 'options-from-pause') {
       fillSettingsForm();
@@ -1083,6 +1580,7 @@ const menuMapEl = document.getElementById('menu-map');
 if (menuMapEl) menuMapEl.value = selectedMapId;
 const mpMapEl = document.getElementById('mp-map');
 if (mpMapEl) mpMapEl.value = selectedMapId;
+syncWorldSeedUi(sessionWorldSeed);
 
 window.addEventListener(
   'pointerdown',
@@ -1096,6 +1594,37 @@ window.addEventListener(
 // ----- Init -----
 setLang(settings.language);
 syncLangButtons();
+if (input.isTouchUi) {
+  document.body.classList.add('touch-ui');
+  const hint = document.querySelector('#menu .hint');
+  if (hint) hint.setAttribute('data-i18n', 'hintMobile');
+  document.querySelector('.keybind-touch-note')?.classList.remove('hidden');
+  window.addEventListener('orientationchange', () => {
+    syncOrientationLock();
+    setTimeout(() => syncOrientationLock(), 250);
+  });
+  window.addEventListener('resize', () => syncOrientationLock());
+  // Fullscreen from any gesture (menu + game + settings)
+  const requestFs = () => {
+    tryEnterFullscreen();
+    syncOrientationLock();
+  };
+  document.getElementById('rotate-lock')?.addEventListener('pointerdown', requestFs, {
+    passive: true,
+  });
+  window.addEventListener('pointerdown', requestFs, { passive: true });
+  window.addEventListener('touchstart', requestFs, { passive: true });
+  document.getElementById('nav-back')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigateBack();
+  });
+  window.addEventListener('popstate', () => {
+    navigateBack();
+  });
+  syncOrientationLock();
+  syncNavBack();
+}
 applyDomLang();
 updateBanner();
 loadServerAnnouncement();
@@ -1104,6 +1633,7 @@ setupKeybindUI();
 setSettingsMode('simple');
 
 syncWorldVisibility();
+syncTouchUi();
 buildMenuPlane();
 setupAuthUI();
 document.getElementById('mp-host-close')?.addEventListener('click', () => closeHostModal());
@@ -1122,8 +1652,24 @@ scene.background = null;
 const urlRoom = getRoomFromUrl();
 if (urlRoom) {
   showScreen('multiplayer');
-  joinMatch(urlRoom);
+  if (requireMpLogin()) joinMatch(urlRoom);
 }
+
+document.getElementById('mp-chat-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendChatFromInput(e.target);
+  }
+});
+document.getElementById('hud-chat-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    sendChatFromInput(e.target);
+  }
+});
+document.getElementById('hud-chat-send')?.addEventListener('click', () => {
+  sendChatFromInput(document.getElementById('hud-chat-input'));
+});
 
 // ----- Loop -----
 const clock = new THREE.Clock();
@@ -1161,6 +1707,7 @@ function updateMultiplayer(dt, fi) {
     health: flight.health,
     throttle: flight.throttle,
     skin: planeTypeIndex,
+    name: localMpName || localDisplayName(),
   });
 
   // Territory soft boundary
@@ -1264,18 +1811,42 @@ function updateAimReticle(hitTargets, dt) {
     hud.updateReticle({ visible: false });
     hud.updateThreatIndicators([]);
     hud.updateLockStatus(null);
+    _aimSmoothReady = false;
+    _assistStickyId = null;
+    _assistStickyKind = null;
+    _lockHeldActive = false;
     return;
   }
 
   _aimDir.copy(flight.forward).normalize();
   _aimOrigin.copy(flight.position).addScaledVector(_aimDir, 3.2);
   const aimTargets = hitTargets.filter((t) => t.kind !== 'self' && t.kind !== 'flare');
+  // Touch / Android: wider cone + auto-lock (no RMB/T). Desktop: hold T/RMB.
+  const touchCombat =
+    input.isTouchUi && (gameMode === 'combat' || gameMode === 'multiplayer');
   const assistHit = findAimAssistTarget(_aimOrigin, _aimDir, aimTargets, {
-    maxDist: 520,
-    coneHalf: input.lockHeld ? 0.55 : 0.42,
+    maxDist: touchCombat ? 560 : 520,
+    coneHalf: input.lockHeld || touchCombat ? 0.55 : 0.42,
+    preferId: _assistStickyId,
+    preferKind: _assistStickyKind,
   });
 
-  targetLock.update(dt, hitTargets, assistHit, input.lockHeld, flight.position);
+  if (assistHit?.target) {
+    _assistStickyId = assistHit.target.id;
+    _assistStickyKind = assistHit.target.kind;
+  } else {
+    _assistStickyId = null;
+    _assistStickyKind = null;
+  }
+
+  const touchAutoLock =
+    touchCombat &&
+    !!assistHit?.target &&
+    (assistHit.target.kind === 'ai' || assistHit.target.kind === 'peer');
+  const lockHeld = input.lockHeld || touchAutoLock;
+  _lockHeldActive = lockHeld;
+
+  targetLock.update(dt, hitTargets, assistHit, lockHeld, flight.position, _aimDir);
   const locked = targetLock.getLockedTarget(hitTargets);
   const hardLocked = !!locked;
 
@@ -1287,7 +1858,17 @@ function updateAimReticle(hitTargets, dt) {
     _aimWorld.copy(_aimOrigin).addScaledVector(_aimDir, 260);
   }
 
-  _aimProj.copy(_aimWorld).project(camera);
+  // Smooth aim point in world space before projection (stable soft-lock cursor).
+  if (!_aimSmoothReady) {
+    _aimSmooth.copy(_aimWorld);
+    _aimSmoothReady = true;
+  } else {
+    const hz = hardLocked ? 28 : assistHit?.target ? 16 : 22;
+    const a = 1 - Math.exp(-hz * Math.max(0.001, dt));
+    _aimSmooth.lerp(_aimWorld, a);
+  }
+
+  _aimProj.copy(_aimSmooth).project(camera);
   const w = window.innerWidth;
   const h = window.innerHeight;
   const onScreen =
@@ -1305,9 +1886,9 @@ function updateAimReticle(hitTargets, dt) {
     x: (_aimProj.x * 0.5 + 0.5) * w,
     y: (-_aimProj.y * 0.5 + 0.5) * h,
     weapon: weapons.activeId,
-    locked: !!(input.lockHeld || assistHit?.target) && targetLock.acquireRatio > 0.03,
+    locked: !!(lockHeld || assistHit?.target) && targetLock.acquireRatio > 0.03,
     hardLocked,
-    acquiring: input.lockHeld ? targetLock.acquireRatio : assistHit ? 0.12 : 0,
+    acquiring: lockHeld ? targetLock.acquireRatio : assistHit ? 0.12 : 0,
     dist,
     onScreen,
     softTarget: !!assistHit?.target && !hardLocked,
@@ -1315,7 +1896,7 @@ function updateAimReticle(hitTargets, dt) {
 
   if (hardLocked) {
     hud.updateLockStatus(t('targetLocked'));
-  } else if (input.lockHeld && targetLock.acquireRatio > 0.05) {
+  } else if (lockHeld && targetLock.acquireRatio > 0.05) {
     hud.updateLockStatus(`${t('targetLocking')} ${Math.round(targetLock.acquireRatio * 100)}%`);
   } else {
     hud.updateLockStatus(null);
@@ -1326,7 +1907,11 @@ function updateAimReticle(hitTargets, dt) {
     sound.playUI('success');
   }
 
-  if (_prevLockId != null && targetLock.lockId == null && gameMode === 'combat') {
+  if (
+    _prevLockId != null &&
+    targetLock.lockId == null &&
+    (gameMode === 'combat' || gameMode === 'multiplayer')
+  ) {
     hud.toast(t('targetLost'), 1200);
   }
   _prevLockId = targetLock.lockId;
@@ -1352,7 +1937,7 @@ function tryFire(fi, hitTargets) {
     _aimDir.subVectors(locked.position, origin).normalize();
     const bias = weapons.activeId === 'missile' ? 0.5 : weapons.activeId === 'rocket' ? 0.35 : 0.22;
     fireDir.lerp(_aimDir, bias).normalize();
-  } else if (input.lockHeld) {
+  } else if (_lockHeldActive) {
     const soft = findAimAssistTarget(origin, fireDir, hitTargets, { maxDist: 520, coneHalf: 0.55 });
     if (soft?.target) {
       _aimDir.subVectors(soft.point, origin).normalize();
@@ -1379,6 +1964,8 @@ function tryFire(fi, hitTargets) {
       dy: shot.dir.y,
       dz: shot.dir.z,
       weapon: shot.weapon,
+      lockId: lockTarget?.id ?? null,
+      lockKind: lockTarget?.kind ?? null,
     });
   }
 }
@@ -1405,6 +1992,11 @@ function updatePlaying(dt) {
       hud.toast(t('weaponDisabled'));
       sound.playUI('warn');
     }
+  }
+  if (input.weaponCycle && weapons) {
+    weapons.cycle(1);
+    hud.toast(`${t('weapon')}: ${t(weapons.active.nameKey)}`);
+    sound.playUI('click');
   }
 
   const fi = getFlightInputAdjusted();
@@ -1529,6 +2121,7 @@ function updatePlaying(dt) {
         }
       } else if (target.kind === 'peer') {
         sound.playUI('success');
+        mpHub.sendDamage(damage, weapon);
       } else if (target.kind === 'self' && owner !== 'local') {
         const mods = difficultyMods(
           gameMode === 'multiplayer' ? mpLobby.difficulty : settings.difficulty
@@ -1638,7 +2231,9 @@ function updatePlaying(dt) {
   }
 
   if (gameMode === 'freeroam') {
-    objective = `${mapLabel(getMap(selectedMapId), getLang())} · ${t('fireHint')}`;
+    objective = `${mapLabel(getMap(selectedMapId), getLang())} · ${t(
+      input.isTouchUi ? 'fireHintTouch' : 'fireHint'
+    )}`;
     score = Math.floor(flightTime);
   }
 
@@ -1794,8 +2389,10 @@ function frame(now) {
     if (settings.showFps && fpsEl) fpsEl.textContent = `FPS ${fpsValue}`;
   }
 
-  if (state === 'playing') updatePlaying(dt);
-  else if (state === 'paused') {
+  if (state === 'playing') {
+    // Freeze while waiting for landscape on phones
+    if (!document.body.classList.contains('portrait-locked')) updatePlaying(dt);
+  } else if (state === 'paused') {
     input.pollEdges();
     if (input.pausePressed) {
       state = 'playing';

@@ -41,6 +41,23 @@ export function runwayHeightAt(ap, _lx, _lz) {
 }
 
 /**
+ * If (x,z) is on a hard runway/apron pad, return that strip's flat elevation.
+ * Used to kill slope jitter / z-fighting between mesh and collision.
+ */
+export function airportPadElevation(x, z, airports) {
+  if (!airports?.length) return null;
+  for (const ap of airports) {
+    const { lx, lz } = worldToRunwayLocal(ap, x, z);
+    const hw = ap.width * 0.5 + 16;
+    const hl = ap.length * 0.5 + 20;
+    if (Math.abs(lx) <= hw && Math.abs(lz) <= hl) {
+      return ap.elevation ?? RUNWAY_ELEVATION;
+    }
+  }
+  return null;
+}
+
+/**
  * Level runway pad — elevation = lowest terrain under footprint (cut into hills).
  * @param {object} ap
  * @param {(x:number,z:number)=>number} rawHeight

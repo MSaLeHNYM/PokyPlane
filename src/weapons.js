@@ -59,7 +59,7 @@ export const WEAPON_DEFS = {
     length: 2.9,
     sound: 'rocket',
     homing: true,
-    turnRate: 2.4,
+    turnRate: 3.6,
   },
 };
 
@@ -161,8 +161,9 @@ export class WeaponSystem {
       if (!this.enabled[weaponId]) return null;
       if (!this.canFire()) return null;
       this.cooldown = opts.rate ?? def.fireRate;
-    } else {
-      this.cooldown = opts.rate ?? 0;
+    } else if (opts.rate != null) {
+      // Remote/replay fire: skip gate but only touch cooldown when rate is set.
+      this.cooldown = opts.rate;
     }
 
     const dir = forward.clone().normalize();

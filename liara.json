@@ -1,0 +1,11 @@
+{
+  "platform": "node",
+  "app": "pokyplane",
+  "port": 3000,
+  "node": {
+    "version": "20"
+  },
+  "build": {
+    "commands": ["npm install", "npm run build"]
+  }
+}

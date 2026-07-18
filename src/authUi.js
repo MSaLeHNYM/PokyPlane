@@ -58,8 +58,7 @@ function bindAuthModal() {
   let registerMode = false;
 
   document.getElementById('btn-login')?.addEventListener('click', () => {
-    modal?.classList.remove('hidden');
-    errEl?.classList.add('hidden');
+    openAuthModal();
   });
   document.getElementById('auth-close')?.addEventListener('click', () => modal?.classList.add('hidden'));
 
@@ -97,6 +96,14 @@ function bindAuthModal() {
   });
 
   document.getElementById('btn-logout')?.addEventListener('click', () => logout());
+}
+
+/** Open login/register modal (e.g. multiplayer gate). */
+export function openAuthModal() {
+  const modal = document.getElementById('auth-modal');
+  const errEl = document.getElementById('auth-error');
+  errEl?.classList.add('hidden');
+  modal?.classList.remove('hidden');
 }
 
 async function ensureMeta() {

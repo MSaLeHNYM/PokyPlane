@@ -449,7 +449,18 @@ export class FlightModel {
       this.onGround = true;
       this.velocity.y = 0;
       if (!this.rotateForTakeoff) {
-        this._applyGroundAttitude(dt, post.groundYs, false);
+        const ys = Object.values(post.groundYs);
+        const spread = ys.length ? Math.max(...ys) - Math.min(...ys) : 0;
+        // Flat runway / pad — lock attitude to kill slope jitter / mesh fighting
+        if (spread < 0.1) {
+          this._lockGroundAttitude();
+          // Snap lightly onto the flat surface
+          const gy = ys[0] ?? this.position.y - this.gearHeight;
+          const targetY = gy + this.gearHeight;
+          this.position.y = THREE.MathUtils.lerp(this.position.y, targetY, 1 - Math.exp(-14 * dt));
+        } else {
+          this._applyGroundAttitude(dt, post.groundYs, false);
+        }
       }
     } else if (this.velocity.y > 0.4 || post.minClear > 0.35) {
       this.onGround = false;

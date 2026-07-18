@@ -12,6 +12,8 @@ export function findAimAssistTarget(origin, dir, targets, opts = {}) {
   const maxDist = opts.maxDist ?? 520;
   const coneHalf = opts.coneHalf ?? 0.48; // ~27° half-angle
   const minDot = Math.cos(coneHalf);
+  const preferId = opts.preferId;
+  const preferKind = opts.preferKind;
   let best = null;
   let bestScore = Infinity;
 
@@ -25,7 +27,11 @@ export function findAimAssistTarget(origin, dir, targets, opts = {}) {
     if (dot < minDot) continue;
     const angleScore = (1 - dot) * 120;
     const distScore = (dist / maxDist) * 35;
-    const score = angleScore + distScore;
+    let score = angleScore + distScore;
+    // Stick to current soft target so the cursor doesn't hop between foes.
+    if (preferId != null && t.id === preferId && t.kind === preferKind) {
+      score *= 0.55;
+    }
     if (score < bestScore) {
       bestScore = score;
       best = { target: t, dist, point: t.position.clone() };
@@ -41,6 +47,8 @@ export class TargetLockSystem {
     this.acquire = 0;
     this.acquireTime = 0.65;
     this.maxLockDist = 620;
+    /** Half-angle (rad) — lock breaks if target leaves this forward cone. */
+    this.maintainConeHalf = 0.72; // ~41°
     this._pendingId = null;
     this._pendingKind = null;
     this._justLocked = false;
@@ -69,16 +77,27 @@ export class TargetLockSystem {
     return v;
   }
 
+  /** True if target is still ahead of the nose within the maintain cone. */
+  _isInView(playerPos, aimDir, targetPos) {
+    if (!aimDir || !playerPos || !targetPos) return true;
+    _toTarget.subVectors(targetPos, playerPos);
+    if (_toTarget.lengthSq() < 4) return true;
+    _toTarget.normalize();
+    return aimDir.dot(_toTarget) >= Math.cos(this.maintainConeHalf);
+  }
+
   /**
    * Hold T while a target is in the aim cone to acquire lock.
+   * Completed locks break if the target leaves the forward view / dies / outranges.
    * @param {boolean} lockHeld T key held down
    * @param {object|null} assistHit from findAimAssistTarget
+   * @param {THREE.Vector3} [aimDir] aircraft forward (for view break)
    */
-  update(dt, hitTargets, assistHit, lockHeld, playerPos) {
+  update(dt, hitTargets, assistHit, lockHeld, playerPos, aimDir = null) {
     this._justLocked = false;
     const aimTarget = assistHit?.target;
     const validKinds = new Set(['ai', 'peer']);
-    const fullyLocked = this.lockId != null && this.acquire >= this.acquireTime;
+    let fullyLocked = this.lockId != null && this.acquire >= this.acquireTime;
 
     if (fullyLocked) {
       const locked = hitTargets.find((t) => t.id === this.lockId && t.kind === this.lockKind);
@@ -88,9 +107,15 @@ export class TargetLockSystem {
         const dist = playerPos.distanceTo(locked.position);
         if (dist > this.maxLockDist || (locked.ref && locked.ref.alive === false)) {
           this.clear();
+        } else if (!this._isInView(playerPos, aimDir, locked.position)) {
+          // Looked away — break lock so player must re-acquire
+          this.clear();
         }
       }
-      if (!lockHeld && this.acquire >= this.acquireTime) return;
+      fullyLocked = this.lockId != null && this.acquire >= this.acquireTime;
+      // Keep completed lock while still holding and target remains in view;
+      // if lockHeld is false (looked away on touch), still already cleared above when out of view.
+      if (fullyLocked && !lockHeld) return;
     }
 
     if (lockHeld) {
@@ -125,7 +150,7 @@ export class TargetLockSystem {
       return;
     }
 
-    // Released T before lock finished — reset progress (keep completed lock)
+    // Released T before lock finished — reset progress
     if (!fullyLocked) {
       this.acquire = Math.max(0, this.acquire - dt * 1.6);
       if (this.acquire <= 0) {

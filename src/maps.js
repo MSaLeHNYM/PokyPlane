@@ -1,11 +1,13 @@
 /**
- * Five open-world map themes — each uses a distinct terrain profile (see terrainGen.js).
+ * Five open-world map themes — climate/colors/props.
+ * World layout comes from worldSeed + themeBaseSeed (see terrainGen.js).
  */
 export const MAPS = [
   {
     id: 'meadow',
     biome: 'temperate',
     name: { en: 'Green Meadows', fa: 'چمن‌زار سبز' },
+    themeBaseSeed: 42,
     seed: 42,
     heightScale: 1,
     fog: 0x87b8d8,
@@ -31,13 +33,31 @@ export const MAPS = [
     worldBound: 400,
     mpTerritory: 220,
     wind: { speed: 5, direction: 0.55, turbulence: 0.28 },
+    /** Layered terrain profile — balanced hills + ranges. */
+    terrain: {
+      freq: 0.0042,
+      warpStr: 2.35,
+      landBias: 0.28,
+      mountainLo: 0.12,
+      mountainHi: 0.48,
+      hillsAmp: 18,
+      detailAmp: 3.5,
+      ridgeAmp: 105,
+      peakAmp: 48,
+      rangeAmpMin: 0.9,
+      rangeAmpMax: 1.65,
+      hubRadius: 380,
+      oceanDepth: 0,
+      style: 'alpine',
+    },
   },
   {
     id: 'desert',
     biome: 'desert',
     name: { en: 'Sunscar Desert', fa: 'بیابان آفتاب‌سوخته' },
+    themeBaseSeed: 91,
     seed: 91,
-    heightScale: 0.75,
+    heightScale: 1,
     fog: 0xe8c9a0,
     fogDensity: 0.0022,
     waterDeep: 0x2a6a6e,
@@ -61,13 +81,30 @@ export const MAPS = [
     worldBound: 400,
     mpTerritory: 200,
     wind: { speed: 11, direction: 2.1, turbulence: 0.55 },
+    terrain: {
+      freq: 0.0035,
+      warpStr: 1.8,
+      landBias: 0.45,
+      mountainLo: -0.05,
+      mountainHi: 0.35,
+      hillsAmp: 12,
+      detailAmp: 2.6,
+      ridgeAmp: 52,
+      peakAmp: 36,
+      rangeAmpMin: 0.8,
+      rangeAmpMax: 1.45,
+      hubRadius: 320,
+      oceanDepth: 0,
+      style: 'desert',
+    },
   },
   {
     id: 'arctic',
     biome: 'alpine',
     name: { en: 'Frostbite Peaks', fa: 'قلّه‌های یخبندان' },
+    themeBaseSeed: 17,
     seed: 17,
-    heightScale: 1.35,
+    heightScale: 1.1,
     fog: 0xc8d8e8,
     fogDensity: 0.002,
     waterDeep: 0x1a3a5a,
@@ -91,13 +128,30 @@ export const MAPS = [
     worldBound: 400,
     mpTerritory: 210,
     wind: { speed: 14, direction: 4.7, turbulence: 0.38 },
+    terrain: {
+      freq: 0.004,
+      warpStr: 2.5,
+      landBias: 0.22,
+      mountainLo: 0.15,
+      mountainHi: 0.48,
+      hillsAmp: 16,
+      detailAmp: 4,
+      ridgeAmp: 115,
+      peakAmp: 50,
+      rangeAmpMin: 0.95,
+      rangeAmpMax: 1.55,
+      hubRadius: 420,
+      oceanDepth: 0,
+      style: 'alpine',
+    },
   },
   {
     id: 'islands',
     biome: 'tropical',
     name: { en: 'Coral Archipelago', fa: ' مجمع‌الجزایر مرجانی' },
+    themeBaseSeed: 55,
     seed: 55,
-    heightScale: 0.55,
+    heightScale: 1,
     fog: 0x70c8e0,
     fogDensity: 0.0014,
     waterDeep: 0x006090,
@@ -121,13 +175,30 @@ export const MAPS = [
     worldBound: 400,
     mpTerritory: 230,
     wind: { speed: 9, direction: 1.2, turbulence: 0.42 },
+    terrain: {
+      freq: 0.0038,
+      warpStr: 2.1,
+      landBias: 0.05,
+      mountainLo: 0.32,
+      mountainHi: 0.65,
+      hillsAmp: 14,
+      detailAmp: 2.8,
+      ridgeAmp: 55,
+      peakAmp: 28,
+      rangeAmpMin: 0.8,
+      rangeAmpMax: 1.4,
+      hubRadius: 400,
+      oceanDepth: 18,
+      style: 'islands',
+    },
   },
   {
     id: 'volcanic',
     biome: 'volcanic',
     name: { en: 'Ember Crater', fa: 'دهانه اخگر' },
+    themeBaseSeed: 77,
     seed: 77,
-    heightScale: 1.2,
+    heightScale: 1.05,
     fog: 0x4a3030,
     fogDensity: 0.0024,
     waterDeep: 0x1a0808,
@@ -142,7 +213,7 @@ export const MAPS = [
     mid: 0x4a3530,
     mid2: 0x6a4030,
     rock: 0x3a3038,
-    snow: 0xff6020, // "lava" tips
+    snow: 0xff6020,
     treeLeaf: 0x3a2020,
     treeTrunk: 0x1a1010,
     rockColor: 0x3a3035,
@@ -152,6 +223,22 @@ export const MAPS = [
     mpTerritory: 190,
     lava: true,
     wind: { speed: 7, direction: 5.5, turbulence: 0.72 },
+    terrain: {
+      freq: 0.0039,
+      warpStr: 2.0,
+      landBias: 0.32,
+      mountainLo: 0.34,
+      mountainHi: 0.68,
+      hillsAmp: 12,
+      detailAmp: 3.0,
+      ridgeAmp: 70,
+      peakAmp: 36,
+      rangeAmpMin: 0.9,
+      rangeAmpMax: 1.6,
+      hubRadius: 360,
+      oceanDepth: 0,
+      style: 'volcanic',
+    },
   },
 ];
 
@@ -172,4 +259,9 @@ export function getMapWind(map, weather = 'clear') {
 
 export function mapLabel(map, lang = 'en') {
   return map.name[lang] || map.name.en;
+}
+
+/** Theme flavor seed (layout comes from worldSeed). */
+export function themeBaseSeedOf(map) {
+  return (map?.themeBaseSeed ?? map?.seed ?? 1) >>> 0;
 }

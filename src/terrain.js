@@ -4,8 +4,8 @@
  * Meshes stream in/out around the player.
  */
 import * as THREE from 'three';
-import { createNoise } from './noise.js';
-import { getMap } from './maps.js';
+import { createNoise, deriveSeed, randomWorldSeed } from './noise.js';
+import { getMap, themeBaseSeedOf } from './maps.js';
 import {
   generateAirports,
   flattenForAirports,
@@ -165,12 +165,13 @@ const _tmpColorA = new THREE.Color();
 const _tmpColorB = new THREE.Color();
 
 export class World {
-  constructor(scene, quality = 'medium', mapId = 'meadow') {
+  constructor(scene, quality = 'medium', mapId = 'meadow', worldSeed = null) {
     this.scene = scene;
     this.quality = normalizeQuality(quality);
     this._tier = getQualityTier(this.quality);
     this.mapId = mapId;
-    this.map = getMap(mapId);
+    this.worldSeed = worldSeed == null ? randomWorldSeed() : worldSeed >>> 0;
+    this.map = this._bindMap(mapId, this.worldSeed);
     this.noise = createNoise(this.map.seed);
     this.dayTime = MORNING_TIME;
     this.dayCycleSpeed = DAY_CYCLE_SPEED;
@@ -188,6 +189,9 @@ export class World {
     this._horizonTerrain = null;
     this._horizonSx = null;
     this._horizonSz = null;
+    this._horizonMat = null;
+    this._horizonCut = null;
+    this._viewerAltitude = 0;
     this._sunDir = new THREE.Vector3(1, 0.5, 0);
     this._skyRadius = 1400;
     // Shared GPU resources — avoids VRAM churn while chunks stream in/out.
@@ -238,6 +242,26 @@ export class World {
     this._chunkLoadPending = false;
   }
 
+  /** Merge theme + runtime worldSeed into a map object used by height/color/RNG. */
+  _bindMap(mapId, worldSeed) {
+    const theme = getMap(mapId);
+    const themeBase = themeBaseSeedOf(theme);
+    const ws = worldSeed >>> 0;
+    return {
+      ...theme,
+      themeBaseSeed: themeBase,
+      worldSeed: ws,
+      seed: deriveSeed(ws, themeBase, 1),
+      channels: {
+        height: deriveSeed(ws, themeBase, 1),
+        warp: deriveSeed(ws, themeBase, 2),
+        mountains: deriveSeed(ws, themeBase, 3),
+        moisture: deriveSeed(ws, themeBase, 4),
+        props: deriveSeed(ws, themeBase, 5),
+      },
+    };
+  }
+
   /** Start terrain streaming (call when entering a flight session). */
   enableStreaming(x = 0, z = 0) {
     this._streamingEnabled = true;
@@ -247,7 +271,7 @@ export class World {
     this._chunkLoadPending = true;
     this.updateChunks(x, z, true);
 
-    // Preload entire visible ring as fast as possible (~1 s target with LOD).
+    // Preload entire visible ring as fast as possible.
     this._preloading = true;
     let guard = 0;
     const guardMax = MAX_CHUNKS_IN_MEMORY + MAX_PENDING_CHUNK_KEYS;
@@ -330,7 +354,7 @@ export class World {
     this.setViewDistanceKm((Number(n) * CHUNK_SIZE) / 1000);
   }
 
-  /** Chunks actually loaded around the player — scales with view distance (LOD farther out). */
+  /** Chunks actually loaded around the player — scales with view distance + altitude. */
   get loadRadius() {
     const tier = this._tier || getQualityTier(this.quality);
     const km = this.viewDistanceKm || 1;
@@ -340,37 +364,15 @@ export class World {
     else if (km >= 100) target = 14;
     else if (km >= 25) target = 10;
     else if (km >= 10) target = 8;
+    const alt = this._viewerAltitude || 0;
+    if (alt > 200) target += 3;
+    else if (alt > 80) target += 2;
     return Math.max(2, Math.min(MAX_LOAD_RADIUS, target));
-  }
-
-  /** Full-detail chunk ring (props, strips, high mesh density). */
-  get detailLoadRadius() {
-    const tier = getQualityTier(this.quality);
-    const lr = this.loadRadius;
-    return Math.max(tier.loadRadius, Math.min(lr, Math.ceil(lr * 0.62)));
   }
 
   getSkyShellRadius() {
     const horizon = this.getHorizonMeters();
     return Math.min(MAX_SKY_SHELL_RADIUS, Math.max(1400, 900 + Math.sqrt(horizon) * 14));
-  }
-
-  _chunkLod(cx, cz) {
-    const pcx = this._lastCx ?? cx;
-    const pcz = this._lastCz ?? cz;
-    const dist = Math.max(Math.abs(cx - pcx), Math.abs(cz - pcz));
-    const inner = this.detailLoadRadius;
-    if (dist <= inner) return 'full';
-    if (dist <= inner + 8) return 'medium';
-    return 'far';
-  }
-
-  _chunkSegsFor(cx, cz) {
-    const lod = this._chunkLod(cx, cz);
-    const full = this._tier.chunkSegs;
-    if (lod === 'full') return full;
-    if (lod === 'medium') return Math.max(6, Math.ceil(full * 0.72));
-    return Math.max(4, Math.ceil(full * 0.42));
   }
 
   /** Chunks built per frame while streaming — scales up when catching up. */
@@ -509,12 +511,19 @@ export class World {
     return this.map.mpTerritory ?? 220;
   }
 
-  rebuild(mapId, quality = this.quality) {
+  rebuild(mapId, quality = this.quality, worldSeed = null) {
+    const nextSeed =
+      worldSeed == null
+        ? this.worldSeed != null
+          ? this.worldSeed
+          : randomWorldSeed()
+        : worldSeed >>> 0;
     this.dispose();
     this.quality = normalizeQuality(quality);
     this._tier = getQualityTier(this.quality);
     this.mapId = mapId;
-    this.map = getMap(mapId);
+    this.worldSeed = nextSeed;
+    this.map = this._bindMap(mapId, nextSeed);
     this.noise = createNoise(this.map.seed);
     this.uniforms.water.uDeep.value.set(this.map.waterDeep);
     this.uniforms.water.uShallow.value.set(this.map.waterShallow);
@@ -531,6 +540,7 @@ export class World {
     this.chunks = new Map();
     this.dayTime = MORNING_TIME;
     this._stripTried = new Set();
+    this._viewerAltitude = 0;
     this._buildGlobals();
     this._initAirports();
     this._rebuildHorizonTerrain();
@@ -626,6 +636,15 @@ export class World {
     return this.sampleHeight(x, z);
   }
 
+  _waterPlaneSize() {
+    // Keep water modest — oversized sheets look like a flat plane over land from altitude.
+    const chunkDisk = this.loadRadius * CHUNK_SIZE * 2.2;
+    const islands = this.mapId === 'islands';
+    const cap = islands ? 24000 : 10000;
+    const min = islands ? 6000 : 3200;
+    return Math.min(cap, Math.max(min, chunkDisk * (islands ? 1.6 : 1.25)));
+  }
+
   _resizeAtmosphere() {
     const clip = this.getClipDistance();
     const skyR = this.getSkyShellRadius();
@@ -637,8 +656,7 @@ export class World {
       this.sky.geometry = new THREE.SphereGeometry(skyR, sw, sh);
     }
     if (this.water) {
-      const horizon = this.getHorizonMeters();
-      const waterSize = Math.min(32000, Math.max(1600, horizon * 0.012));
+      const waterSize = this._waterPlaneSize();
       this.water.geometry.dispose();
       this.water.geometry = new THREE.PlaneGeometry(
         waterSize,
@@ -658,13 +676,16 @@ export class World {
     return clip;
   }
 
+  /** Far terrain ring — always on so altitude never falls into empty water. */
   _horizonTerrainRadius() {
     const km = this.viewDistanceKm || 1;
-    if (km < 50) return 0;
-    if (km >= 1000) return 120000;
-    if (km >= 500) return 80000;
-    if (km >= 100) return 50000;
-    return 28000;
+    const chunkExtent = this.loadRadius * CHUNK_SIZE * 3.2;
+    if (km >= 1000) return Math.max(90000, chunkExtent);
+    if (km >= 500) return Math.max(60000, chunkExtent);
+    if (km >= 100) return Math.max(36000, chunkExtent);
+    if (km >= 25) return Math.max(20000, chunkExtent);
+    if (km >= 10) return Math.max(12000, chunkExtent);
+    return Math.max(7000, chunkExtent * 1.25);
   }
 
   _disposeHorizonTerrain() {
@@ -676,6 +697,70 @@ export class World {
     this._horizonSz = null;
   }
 
+  _disposeHorizonMaterial() {
+    this._horizonMat?.dispose?.();
+    this._horizonMat = null;
+    this._horizonCut = null;
+  }
+
+  _ensureHorizonMaterial() {
+    if (this._horizonMat || !this._terrainMat) return;
+    this._horizonMat = this._terrainMat.clone();
+    this._horizonMat.polygonOffset = true;
+    this._horizonMat.polygonOffsetFactor = 2;
+    this._horizonMat.polygonOffsetUnits = 2;
+    this._horizonMat.depthWrite = true;
+    // Punch a hole under the streamed chunk disk so the coarse horizon
+    // mesh cannot form flat "lids" across valleys / depressions.
+    this._horizonCut = {
+      uPlayerXZ: { value: new THREE.Vector2(0, 0) },
+      uInnerR2: { value: 1 },
+    };
+    this._horizonMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uPlayerXZ = this._horizonCut.uPlayerXZ;
+      shader.uniforms.uInnerR2 = this._horizonCut.uInnerR2;
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+varying vec3 vHorizonWorld;`
+        )
+        .replace(
+          '#include <worldpos_vertex>',
+          `#include <worldpos_vertex>
+vHorizonWorld = worldPosition.xyz;`
+        );
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+uniform vec2 uPlayerXZ;
+uniform float uInnerR2;
+varying vec3 vHorizonWorld;`
+        )
+        .replace(
+          '#include <clipping_planes_fragment>',
+          `#include <clipping_planes_fragment>
+vec2 hDelta = vHorizonWorld.xz - uPlayerXZ;
+if (dot(hDelta, hDelta) < uInnerR2) discard;`
+        );
+    };
+    this._horizonMat.customProgramCacheKey = () => 'horizon-cut-v1';
+  }
+
+  _syncHorizonCutout(x, z) {
+    if (!this._horizonCut) return;
+    // Slightly larger than the loaded chunk disk so the seam sits outside detail meshes.
+    const inner = Math.max(CHUNK_SIZE * 2, this.loadRadius * CHUNK_SIZE * 1.2);
+    this._horizonCut.uPlayerXZ.value.set(x, z);
+    this._horizonCut.uInnerR2.value = inner * inner;
+  }
+
+  /**
+   * Real heights everywhere — no -999 hole (that exposed the water sheet as a
+   * flat plane with only mountain tops poking through).
+   * Inner disk is discarded in the shader instead (see _ensureHorizonMaterial).
+   */
   _fillHorizonTerrainGeo(geo, centerX, centerZ) {
     const pos = geo.attributes.position;
     const colorAttr = geo.attributes.color;
@@ -684,20 +769,12 @@ export class World {
     const c2 = _tmpColorB;
     const m = this.map;
     const pa = pos.array;
-    const innerCut = Math.max(CHUNK_SIZE * 2, this.detailLoadRadius * CHUNK_SIZE * 0.98);
     for (let i = 0; i < pos.count; i++) {
       const i3 = i * 3;
       const lx = pa[i3];
       const lz = pa[i3 + 2];
       const wx = centerX + lx;
       const wz = centerZ + lz;
-      if (Math.hypot(lx, lz) < innerCut) {
-        pa[i3 + 1] = -999;
-        colors[i * 3] = 0;
-        colors[i * 3 + 1] = 0;
-        colors[i * 3 + 2] = 0;
-        continue;
-      }
       const h = this.sampleHeight(wx, wz);
       pa[i3 + 1] = h;
       this._applyTerrainColor(h, c, c2, m);
@@ -713,21 +790,22 @@ export class World {
   _rebuildHorizonTerrain() {
     this._disposeHorizonTerrain();
     if (!this._terrainMat) return;
+    this._ensureHorizonMaterial();
     const radius = this._horizonTerrainRadius();
     if (radius <= 0) return;
 
     const km = this.viewDistanceKm || 1;
-    const segs = km >= 1000 ? 96 : km >= 100 ? 72 : km >= 50 ? 48 : 32;
+    const segs = km >= 1000 ? 128 : km >= 100 ? 96 : km >= 25 ? 80 : km >= 10 ? 72 : 64;
     const size = radius * 2;
     const geo = new THREE.PlaneGeometry(size, size, segs, segs);
     geo.rotateX(-Math.PI / 2);
     const count = (segs + 1) * (segs + 1);
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
     this._fillHorizonTerrainGeo(geo, 0, 0);
-    this._horizonTerrain = new THREE.Mesh(geo, this._terrainMat);
+    this._horizonTerrain = new THREE.Mesh(geo, this._horizonMat);
     this._horizonTerrain.frustumCulled = false;
     this._horizonTerrain.receiveShadow = false;
-    this._horizonTerrain.renderOrder = -20;
+    this._horizonTerrain.renderOrder = -5;
     this.group.add(this._horizonTerrain);
   }
 
@@ -735,7 +813,8 @@ export class World {
     if (!this._horizonTerrain) return;
     const radius = this._horizonTerrainRadius();
     if (radius <= 0) return;
-    const snap = Math.max(512, radius * 0.08);
+    this._syncHorizonCutout(x, z);
+    const snap = Math.max(1600, radius * 0.2);
     const sx = Math.floor(x / snap) * snap;
     const sz = Math.floor(z / snap) * snap;
     if (sx !== this._horizonSx || sz !== this._horizonSz) {
@@ -799,6 +878,8 @@ export class World {
   }
 
   _disposeSharedResources() {
+    this._disposeHorizonTerrain();
+    this._disposeHorizonMaterial();
     this._terrainMat?.dispose?.();
     this._terrainMat = null;
     for (const g of Object.values(this._propGeo)) g?.dispose?.();
@@ -870,8 +951,7 @@ export class World {
     this.sky.renderOrder = -1000;
     atmos.add(this.sky);
 
-    const horizon = this.getHorizonMeters();
-    const waterSize = Math.min(32000, Math.max(1600, horizon * 0.012));
+    const waterSize = this._waterPlaneSize();
     this.water = new THREE.Mesh(
       new THREE.PlaneGeometry(waterSize, waterSize, this._tier.waterSegs, this._tier.waterSegs),
       new THREE.ShaderMaterial({
@@ -887,7 +967,7 @@ export class World {
     this.water.rotation.x = -Math.PI / 2;
     this.water.position.set(0, m.waterY ?? 0, 0);
     this.water.frustumCulled = false;
-    this.water.renderOrder = 1;
+    this.water.renderOrder = -1;
     this.group.add(this.water);
 
     this.hemi = new THREE.HemisphereLight(m.hemiSky, m.hemiGround, this._tier.hemiIntensity);
@@ -1194,9 +1274,27 @@ export class World {
         roughness: 0.92,
         metalness: 0.05,
         fog: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        depthWrite: true,
       }),
-      apron: new THREE.MeshStandardMaterial({ color: 0x4a5058, roughness: 0.95, fog: false }),
-      pad: new THREE.MeshStandardMaterial({ color: 0x5c5248, roughness: 0.98, fog: false }),
+      apron: new THREE.MeshStandardMaterial({
+        color: 0x4a5058,
+        roughness: 0.95,
+        fog: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
+      pad: new THREE.MeshStandardMaterial({
+        color: 0x5c5248,
+        roughness: 0.98,
+        fog: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }),
       concrete: new THREE.MeshStandardMaterial({ color: 0x8a9098, flatShading: true, fog: false }),
       glass: new THREE.MeshStandardMaterial({
         color: 0x9ad0f0,
@@ -1214,8 +1312,9 @@ export class World {
   _addAirportMeshes(ap) {
     const mats = this._ensureAirportMaterials();
     const elev = ap.elevation ?? 0.12;
-    const yPad = elev + 0.05;
-    const yRunway = elev + 0.14;
+    // Keep visuals clearly above flattened terrain to avoid z-fighting / sinking
+    const yPad = elev + 0.18;
+    const yRunway = elev + 0.32;
     const added = [];
 
     const cutPad = new THREE.Mesh(
@@ -1226,6 +1325,7 @@ export class World {
     cutPad.rotation.z = -ap.heading;
     cutPad.position.set(ap.x, yPad, ap.z);
     cutPad.receiveShadow = this._shadowsEnabled;
+    cutPad.renderOrder = 2;
     this.group.add(cutPad);
     added.push(cutPad);
 
@@ -1234,6 +1334,7 @@ export class World {
     strip.rotation.z = -ap.heading;
     strip.position.set(ap.x, yRunway, ap.z);
     strip.receiveShadow = this._shadowsEnabled;
+    strip.renderOrder = 3;
     this.group.add(strip);
     added.push(strip);
 
@@ -1242,6 +1343,7 @@ export class World {
     apron.rotation.z = -ap.heading;
     const apronOff = localToWorldXZ(ap, 0, -ap.length * 0.38);
     apron.position.set(apronOff.x, yRunway, apronOff.z);
+    apron.renderOrder = 3;
     this.group.add(apron);
     added.push(apron);
 
@@ -1276,7 +1378,7 @@ export class World {
       (x, z) => this._rawHeight(x, z),
       this.airports,
       this.stripSpawnChance,
-      this.map.seed || 1
+      this.worldSeed ?? this.map.seed ?? 1
     );
     if (!ap) return null;
 
@@ -1382,15 +1484,12 @@ export class World {
   }
 
   _buildChunk(cx, cz, opts = {}) {
-    const lod = this._chunkLod(cx, cz);
-    const fullDetail = lod === 'full';
-
     if (!opts.skipStripRoll) {
       const newAp = this._trySpawnChunkStrip(cx, cz);
       if (newAp) this._rebuildLoadedChunksForAirport(newAp, cx, cz);
     }
 
-    const segs = opts.forceSegs ?? this._chunkSegsFor(cx, cz);
+    const segs = opts.forceSegs ?? this._chunkSegs();
     const size = CHUNK_SIZE;
     const geo = this._acquireChunkGeometry(segs);
     const pos = geo.attributes.position;
@@ -1422,12 +1521,12 @@ export class World {
 
     const mesh = new THREE.Mesh(geo, this._terrainMat);
     mesh.position.set(originX, 0, originZ);
-    mesh.receiveShadow = this._shadowsEnabled && fullDetail;
+    mesh.receiveShadow = this._shadowsEnabled;
     mesh.castShadow = false;
     this.group.add(mesh);
 
-    const props = fullDetail ? this._scatterInChunk(cx, cz, originX, originZ) : [];
-    return { mesh, props, cx, cz, lod };
+    const props = this._scatterInChunk(cx, cz, originX, originZ);
+    return { mesh, props, cx, cz };
   }
 
   _scatterInChunk(cx, cz, ox, oz) {
@@ -1440,7 +1539,7 @@ export class World {
     const objs = [];
     const count = this._propCount();
     const { min: minH, max: maxH } = propHeightRange(m);
-    const rng = (this.map.seed * 73856093 + cx * 19349663 + cz * 83492791) >>> 0;
+    const rng = ((this.map.channels?.props ?? this.map.seed) * 73856093 + cx * 19349663 + cz * 83492791) >>> 0;
     let s = rng;
     const rand = () => {
       s = (s * 1664525 + 1013904223) >>> 0;
@@ -1703,6 +1802,14 @@ export class World {
     }
 
     if (followPos) {
+      const groundY = this.sampleHeight(followPos.x, followPos.z);
+      const prevAltBand = this._viewerAltitude > 200 ? 2 : this._viewerAltitude > 80 ? 1 : 0;
+      this._viewerAltitude = Math.max(0, followPos.y - groundY);
+      const altBand = this._viewerAltitude > 200 ? 2 : this._viewerAltitude > 80 ? 1 : 0;
+      if (altBand !== prevAltBand && this._streamingEnabled) {
+        this._chunkLoadPending = true;
+        this._lastCx = null;
+      }
       if (this.atmosphereGroup) {
         this.atmosphereGroup.position.copy(followPos);
       }

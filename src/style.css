@@ -73,21 +73,30 @@ body,
   justify-content: center;
   overflow-x: hidden;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   pointer-events: auto;
   padding: 1.5rem 1rem;
+  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px));
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
 }
 
-/* Main menu — no page scroll; content scales to viewport */
+/* Main menu — scrollable on short / phone screens */
 #menu.screen {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 0;
   justify-content: flex-start;
   align-items: center;
+  padding-top: env(safe-area-inset-top, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 #menu.screen > .menu-content {
   margin: 0 auto;
-  flex-shrink: 1;
+  flex-shrink: 0;
   min-height: 0;
 }
 
@@ -118,8 +127,8 @@ body,
   width: min(100%, 420px);
   text-align: center;
   padding: 2.85rem 1rem 0.65rem;
-  max-height: 100dvh;
-  overflow: hidden;
+  max-height: none;
+  overflow: visible;
   box-sizing: border-box;
   animation: fadeUp 0.7s ease-out;
 }
@@ -127,7 +136,6 @@ body,
 /* Extra top room when announcement banner is visible */
 #menu:has(#announce-banner:not(.hidden)) .menu-content {
   padding-top: 5.5rem;
-  max-height: 100dvh;
 }
 
 #menu:has(#announce-banner:not(.hidden)) .menu-topbar {
@@ -221,25 +229,6 @@ body,
   50% { transform: translateY(-6px); }
 }
 
-.hud-logo {
-  position: absolute;
-  top: 0.45rem;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(110px, 26vw);
-  height: auto;
-  aspect-ratio: 420 / 120;
-  object-fit: contain;
-  opacity: 0.65;
-  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.45));
-  pointer-events: none;
-  z-index: 11;
-}
-
-#hud .hud-top {
-  top: 2.1rem;
-}
-
 .logo span {
   color: var(--accent);
 }
@@ -276,6 +265,11 @@ body,
 .plane-btn:hover {
   transform: translateY(-2px) scale(1.06);
   border-color: rgba(255, 255, 255, 0.35);
+}
+
+.plane-btn:active {
+  transform: scale(0.96);
+  border-color: var(--accent);
 }
 
 .plane-btn.active {
@@ -321,6 +315,11 @@ body,
   background: rgba(30, 60, 95, 0.9);
 }
 
+.menu-btn:active {
+  transform: scale(0.97);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
 .menu-btn.primary {
   background: linear-gradient(135deg, var(--accent), #ff8f6b);
   border-color: transparent;
@@ -330,6 +329,11 @@ body,
 
 .menu-btn.primary:hover {
   background: linear-gradient(135deg, #ff7a5c, #ffb088);
+}
+
+.menu-btn.primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 4px 12px rgba(255, 107, 74, 0.3);
 }
 
 .hint {
@@ -381,14 +385,14 @@ body,
 
 .hud-top {
   position: absolute;
-  top: 1rem;
+  top: calc(1rem + env(safe-area-inset-top, 0px));
   left: 0;
   right: 0;
   display: flex;
   justify-content: center;
   gap: 0.75rem;
   flex-wrap: wrap;
-  padding: 0 1rem;
+  padding: 0 calc(1rem + env(safe-area-inset-right, 0px)) 0 calc(1rem + env(safe-area-inset-left, 0px));
 }
 
 .hud-panel {
@@ -434,10 +438,13 @@ body,
   top: 0;
   width: 48px;
   height: 48px;
-  margin: -24px 0 0 -24px;
+  margin: 0;
   pointer-events: none;
   z-index: 12;
+  transform: translate3d(-9999px, -9999px, 0);
+  will-change: transform;
   transition: opacity 0.12s ease;
+  contain: layout style;
 }
 
 .target-reticle.hidden {
@@ -713,7 +720,7 @@ body,
 
 .hud-bottom {
   position: absolute;
-  bottom: 1.25rem;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -882,56 +889,191 @@ body,
   inset: 0;
   z-index: 15;
   pointer-events: none;
+  padding:
+    env(safe-area-inset-top, 0px)
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
+}
+
+.touch-pause {
+  position: absolute;
+  top: calc(0.75rem + env(safe-area-inset-top, 0px));
+  right: calc(0.75rem + env(safe-area-inset-right, 0px));
+  width: 48px;
+  height: 48px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(18, 42, 68, 0.82);
+  color: #fff;
+  font-weight: 900;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  font-family: var(--font-ui);
+  pointer-events: auto;
+  z-index: 16;
+  touch-action: manipulation;
+}
+
+.touch-pause:active {
+  background: rgba(255, 107, 74, 0.75);
+  transform: scale(0.94);
 }
 
 .stick {
   position: absolute;
-  bottom: 2rem;
-  left: 2rem;
-  width: 110px;
-  height: 110px;
+  bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
+  left: calc(1rem + env(safe-area-inset-left, 0px));
+  width: min(22vw, 120px);
+  height: min(22vw, 120px);
+  min-width: 96px;
+  min-height: 96px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.12);
   border: 2px solid rgba(255, 255, 255, 0.25);
   pointer-events: auto;
+  touch-action: none;
+}
+
+body.touch-ui .stick {
+  width: min(30vmin, 140px);
+  height: min(30vmin, 140px);
+  min-width: 112px;
+  min-height: 112px;
+}
+
+body.touch-ui .touch-btns button,
+body.touch-ui .touch-btn {
+  width: min(12vmin, 52px);
+  height: min(12vmin, 52px);
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 0.58rem;
+}
+
+body.touch-ui .touch-btns button.secondary,
+body.touch-ui .touch-btn.secondary {
+  width: min(10vmin, 44px);
+  height: min(10vmin, 44px);
+  min-width: 40px;
+  min-height: 40px;
+  font-size: 0.5rem;
+}
+
+body.touch-ui .touch-btns button.fire,
+body.touch-ui .touch-btn.fire {
+  width: min(15vmin, 62px);
+  height: min(15vmin, 62px);
+  min-width: 52px;
+  min-height: 52px;
+  font-size: 0.68rem;
+}
+
+body.touch-ui .touch-pause {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  font-size: 0.75rem;
+}
+
+body.touch-ui .hud-panel {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  border-radius: 8px;
 }
 
 .stick-knob {
   position: absolute;
-  width: 44px;
-  height: 44px;
+  width: 42%;
+  height: 42%;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.45);
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
 .touch-btns {
   position: absolute;
-  bottom: 2rem;
-  right: 2rem;
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  right: calc(0.65rem + env(safe-area-inset-right, 0px));
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  align-items: flex-end;
+  gap: 0.45rem;
   pointer-events: auto;
 }
 
-.touch-btns button {
-  width: 64px;
-  height: 64px;
+.touch-btn-row {
+  display: flex;
+  flex-direction: row;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.touch-btn-row-main {
+  gap: 0.55rem;
+}
+
+.touch-btns button,
+.touch-btn {
+  width: min(16vw, 72px);
+  height: min(16vw, 72px);
+  min-width: 56px;
+  min-height: 56px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.3);
   background: rgba(255, 107, 74, 0.55);
   color: #fff;
   font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
   font-family: var(--font-ui);
   pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touch-btns button.secondary,
+.touch-btn.secondary {
+  background: rgba(30, 60, 95, 0.72);
+  min-width: 48px;
+  min-height: 48px;
+  width: min(13vw, 58px);
+  height: min(13vw, 58px);
+  font-size: 0.65rem;
+}
+
+.touch-btns button.boost,
+.touch-btn.boost {
+  background: rgba(251, 191, 36, 0.65);
+  color: #1a1520;
+}
+
+.touch-btns button.fire,
+.touch-btn.fire {
+  width: min(20vw, 88px);
+  height: min(20vw, 88px);
+  min-width: 68px;
+  min-height: 68px;
+  font-size: 0.85rem;
+  background: rgba(255, 107, 74, 0.78);
+  box-shadow: 0 0 0 3px rgba(255, 107, 74, 0.25);
+}
+
+.touch-btns button:active,
+.touch-btn:active {
+  transform: scale(0.92);
+  filter: brightness(1.15);
 }
 
 @media (max-width: 700px) {
   .menu-content {
-    padding: 2.5rem 0.85rem 0.45rem;
+    padding: 2.5rem 0.85rem 1.25rem;
     width: min(100%, 100%);
   }
 
@@ -944,24 +1086,66 @@ body,
   }
 
   .menu-topbar {
-    padding: 0.75rem 1rem;
+    padding:
+      calc(0.75rem + env(safe-area-inset-top, 0px))
+      calc(1rem + env(safe-area-inset-right, 0px))
+      0.75rem
+      calc(1rem + env(safe-area-inset-left, 0px));
+  }
+
+  .menu-btn {
+    min-height: 44px;
+    padding: 0.7rem 1.1rem;
+  }
+
+  .plane-btn {
+    width: 2.85rem;
+    height: 2.85rem;
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .hud-bottom {
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
-    bottom: 8.5rem;
+    gap: 0.35rem;
+    padding: 0.35rem 0.55rem;
+    /* Keep gauges between sticks — not mid-screen */
+    bottom: calc(0.55rem + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(42vw, 280px);
+    flex-wrap: nowrap;
+    justify-content: center;
+    z-index: 12;
   }
-  .gauge-value { font-size: 1.05rem; }
+  .hud-bottom .gauge {
+    min-width: 36px;
+  }
+  .hud-bottom .gauge-value {
+    font-size: 0.95rem;
+  }
+  .hud-bottom .gauge-label,
+  .hud-bottom .throttle-label,
+  .hud-bottom .health-label,
+  .hud-bottom .fuel-label {
+    font-size: 0.55rem;
+  }
+  .hud-bottom .throttle-bar,
+  .hud-bottom .health-bar,
+  .hud-bottom .fuel-bar {
+    width: 10px;
+    height: 36px;
+  }
   #minimap {
-    width: 90px;
-    height: 90px;
-    bottom: 8.5rem;
-    right: 0.75rem;
+    width: 88px;
+    height: 88px;
+    top: calc(0.4rem + env(safe-area-inset-top, 0px));
+    left: calc(0.45rem + env(safe-area-inset-left, 0px));
+    right: auto;
+    bottom: auto;
   }
   .settings-shell {
     width: 100%;
-    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     border-radius: 16px;
   }
   .settings-body { flex-direction: column; }
@@ -971,6 +1155,17 @@ body,
     width: 100%;
     border-inline-end: none;
     border-bottom: 1px solid var(--panel-border);
+  }
+  .setting-row {
+    min-height: 44px;
+    gap: 0.65rem;
+  }
+  body.touch-ui .keybind-grid {
+    opacity: 0.85;
+  }
+  body.touch-ui .keybind-btn {
+    min-height: 44px;
+    min-width: 4.5rem;
   }
 }
 
@@ -1025,8 +1220,8 @@ body,
 
 .announce-close {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.15);
@@ -1034,6 +1229,12 @@ body,
   font-size: 1.25rem;
   cursor: pointer;
   line-height: 1;
+  touch-action: manipulation;
+}
+
+.announce-close:active {
+  transform: scale(0.92);
+  background: rgba(0, 0, 0, 0.28);
 }
 
 .menu-topbar {
@@ -1382,11 +1583,182 @@ body,
   font-family: var(--font-ui);
 }
 
+.mp-lobby-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+}
+
+.mp-section-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-align: start;
+}
+
+.mp-player-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mp-player-list li {
+  text-align: start;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--panel-border);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.mp-player-list em {
+  font-style: normal;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.mp-role {
+  display: inline-block;
+  min-width: 3.2rem;
+  color: var(--accent-2);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.mp-host-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.menu-btn.danger {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.35);
+}
+
+.menu-btn.danger:disabled {
+  opacity: 0.45;
+}
+
+.mp-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mp-chat-log,
+.hud-chat-log {
+  max-height: 7.5rem;
+  overflow-y: auto;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--panel-border);
+  text-align: start;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.chat-line {
+  margin: 0.15rem 0;
+  word-break: break-word;
+}
+
+.chat-line.self strong {
+  color: #86efac;
+}
+
+.chat-line strong {
+  color: #93c5fd;
+}
+
+.mp-chat-row,
+.hud-chat-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.mp-chat-row input {
+  flex: 1;
+  min-width: 0;
+  background: #123048;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  font-family: var(--font-ui);
+}
+
+.hud-chat {
+  position: absolute;
+  left: calc(0.75rem + env(safe-area-inset-left, 0px));
+  bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  width: min(280px, 42vw);
+  z-index: 40;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.hud-chat.hidden {
+  display: none !important;
+}
+
+.hud-chat-log {
+  max-height: 5.5rem;
+  background: rgba(6, 18, 32, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.hud-chat-row input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(10, 28, 44, 0.9);
+  color: #f0f6ff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  font-family: var(--font-ui);
+}
+
+.hud-chat-send {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(10, 28, 44, 0.85);
+  color: #f0f6ff;
+  border-radius: 8px;
+  padding: 0.35rem 0.55rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+body.touch-ui .hud-chat {
+  bottom: calc(5.2rem + env(safe-area-inset-bottom, 0px));
+  width: min(240px, 48vw);
+}
+
 html.lang-fa .logo { letter-spacing: 0; }
 
 html[dir="rtl"] #minimap {
+  /* Keep minimap on the right so it never covers the left stick */
+  right: calc(0.75rem + env(safe-area-inset-right, 0px));
+  left: auto;
+}
+
+/* Touch: minimap stays top-left (away from pause + stick) */
+body.touch-ui #minimap,
+html[dir="rtl"] body.touch-ui #minimap {
+  left: calc(0.4rem + env(safe-area-inset-left, 0px));
   right: auto;
-  left: 1.25rem;
 }
 
 .map-picker {
@@ -1405,9 +1777,27 @@ html[dir="rtl"] #minimap {
   max-width: 220px;
 }
 
-#minimap {
-  width: 168px;
-  height: 168px;
+.world-seed-line {
+  margin: 0 auto 0.65rem;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.world-seed-line code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 800;
+  color: #e8f0f8;
+  margin-inline-start: 0.25rem;
+}
+
+@media (min-width: 701px) {
+  #minimap {
+    width: 168px;
+    height: 168px;
+  }
 }
 
 /* Account chip in top bar */
@@ -1547,13 +1937,26 @@ html[dir="rtl"] #minimap {
 
 .modal-close {
   position: absolute;
-  top: 0.5rem;
-  right: 0.75rem;
-  background: none;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.2);
   border: none;
+  border-radius: 50%;
   color: var(--muted);
   font-size: 1.5rem;
   cursor: pointer;
+  touch-action: manipulation;
+}
+
+.modal-close:active {
+  background: rgba(255, 107, 74, 0.45);
+  color: #fff;
+  transform: scale(0.94);
 }
 
 .modal-panel label {
@@ -1659,6 +2062,385 @@ html.lang-fa .modal-panel select {
   .host-plane-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Landscape phones — compact HUD, larger stick, smaller buttons */
+@media (orientation: landscape) and (max-height: 520px),
+  (orientation: landscape) and (max-width: 960px) {
+  /* —— Main menu: side-by-side so it fits short landscape viewports —— */
+  body.touch-ui #menu.screen {
+    justify-content: center;
+    align-items: stretch;
+    padding: 0.35rem calc(0.5rem + env(safe-area-inset-right, 0px))
+      0.35rem calc(0.5rem + env(safe-area-inset-left, 0px));
+  }
+
+  body.touch-ui #menu .menu-content {
+    display: grid;
+    grid-template-columns: minmax(120px, 34vw) minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr auto;
+    column-gap: 0.75rem;
+    row-gap: 0.25rem;
+    width: min(100%, 720px);
+    max-height: calc(100dvh - 0.7rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.35rem 0.5rem;
+    text-align: start;
+    margin: auto;
+  }
+
+  body.touch-ui #menu .menu-brand {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    align-self: center;
+    margin: 0;
+  }
+
+  body.touch-ui #menu .game-logo {
+    width: min(150px, 30vw);
+    animation: none;
+  }
+
+  body.touch-ui #menu .tagline {
+    font-size: 0.72rem;
+    margin-top: 0.15rem;
+  }
+
+  body.touch-ui #menu .plane-picker {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  body.touch-ui #menu .plane-tagline {
+    grid-column: 2;
+    grid-row: 2;
+    margin: 0;
+    font-size: 0.7rem;
+    text-align: start;
+  }
+
+  body.touch-ui #menu .map-picker,
+  body.touch-ui #menu .world-seed-line {
+    grid-column: 2;
+    justify-content: flex-start;
+    margin: 0.15rem 0;
+    font-size: 0.72rem;
+  }
+
+  body.touch-ui #menu .menu-nav {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+    margin-top: 0.25rem;
+  }
+
+  body.touch-ui #menu .menu-nav .menu-btn {
+    padding: 0.4rem 0.35rem;
+    font-size: 0.75rem;
+    width: 100%;
+  }
+
+  body.touch-ui #menu .menu-account-row,
+  body.touch-ui #menu .menu-btn-login,
+  body.touch-ui #menu .hint {
+    grid-column: 1 / -1;
+    margin: 0.2rem 0 0;
+    font-size: 0.72rem;
+  }
+
+  body.touch-ui #menu .menu-account-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    justify-content: flex-start;
+  }
+
+  /* —— Settings / MP / host modal: scrollable short panels —— */
+  body.touch-ui #options.screen,
+  body.touch-ui #multiplayer.screen {
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.4rem calc(0.5rem + env(safe-area-inset-right, 0px))
+      0.4rem calc(0.5rem + env(safe-area-inset-left, 0px));
+  }
+
+  body.touch-ui #options .settings-shell,
+  body.touch-ui #multiplayer .panel,
+  body.touch-ui #mp-host-modal .panel {
+    width: min(100%, 640px);
+    max-height: calc(100dvh - 0.8rem);
+    margin: 0 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body.touch-ui #options .settings-shell h2,
+  body.touch-ui #multiplayer .panel h2 {
+    font-size: 1rem;
+    margin: 0.35rem 0;
+  }
+
+  body.touch-ui #options .settings-panels,
+  body.touch-ui #multiplayer .panel {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.touch-ui #options .settings-nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0.25rem;
+  }
+
+  body.touch-ui #options .settings-nav button {
+    padding: 0.35rem 0.55rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  body.touch-ui .host-modal-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem;
+  }
+
+  body.touch-ui .host-check-grid,
+  body.touch-ui .host-plane-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.3rem;
+  }
+
+  body.touch-ui .hud-top {
+    top: calc(0.25rem + env(safe-area-inset-top, 0px));
+    gap: 0.28rem;
+    padding: 0 3.5rem;
+    justify-content: center;
+  }
+
+  body.touch-ui .hud-panel {
+    padding: 0.15rem 0.45rem;
+    font-size: 0.65rem;
+    border-radius: 8px;
+    letter-spacing: 0.02em;
+  }
+
+  body.touch-ui #objective {
+    font-size: 0.75rem;
+    max-width: 40vw;
+  }
+
+  body.touch-ui .stick {
+    width: min(34vmin, 148px);
+    height: min(34vmin, 148px);
+    min-width: 118px;
+    min-height: 118px;
+    bottom: calc(0.45rem + env(safe-area-inset-bottom, 0px));
+    left: calc(0.55rem + env(safe-area-inset-left, 0px));
+  }
+
+  body.touch-ui .touch-btns {
+    bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
+    right: calc(0.4rem + env(safe-area-inset-right, 0px));
+    gap: 0.22rem;
+  }
+
+  body.touch-ui .touch-btn-row {
+    gap: 0.22rem;
+  }
+
+  body.touch-ui .touch-btns button,
+  body.touch-ui .touch-btn {
+    width: min(11vmin, 48px);
+    height: min(11vmin, 48px);
+    min-width: 42px;
+    min-height: 42px;
+    font-size: 0.52rem;
+    border-width: 1.5px;
+  }
+
+  body.touch-ui .touch-btns button.secondary,
+  body.touch-ui .touch-btn.secondary {
+    width: min(10vmin, 42px);
+    height: min(10vmin, 42px);
+    min-width: 38px;
+    min-height: 38px;
+    font-size: 0.48rem;
+  }
+
+  body.touch-ui .touch-btns button.fire,
+  body.touch-ui .touch-btn.fire {
+    width: min(14vmin, 58px);
+    height: min(14vmin, 58px);
+    min-width: 50px;
+    min-height: 50px;
+    font-size: 0.62rem;
+    box-shadow: 0 0 0 2px rgba(255, 107, 74, 0.22);
+  }
+
+  body.touch-ui .touch-pause {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    font-size: 0.7rem;
+    border-radius: 10px;
+    top: calc(0.3rem + env(safe-area-inset-top, 0px));
+    right: calc(0.35rem + env(safe-area-inset-right, 0px));
+  }
+
+  body.touch-ui .hud-bottom {
+    bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
+    max-width: min(36vw, 240px);
+    padding: 0.18rem 0.35rem;
+    gap: 0.22rem;
+    border-radius: 10px;
+  }
+
+  body.touch-ui .hud-bottom .gauge {
+    min-width: 28px;
+  }
+
+  body.touch-ui .hud-bottom .gauge-value {
+    font-size: 0.78rem;
+  }
+
+  body.touch-ui .hud-bottom .gauge-label,
+  body.touch-ui .hud-bottom .throttle-label,
+  body.touch-ui .hud-bottom .health-label,
+  body.touch-ui .hud-bottom .fuel-label {
+    font-size: 0.45rem;
+  }
+
+  body.touch-ui .hud-bottom .throttle-bar,
+  body.touch-ui .hud-bottom .health-bar,
+  body.touch-ui .hud-bottom .fuel-bar {
+    width: 7px;
+    height: 26px;
+  }
+
+  body.touch-ui #minimap {
+    width: 88px;
+    height: 88px;
+    top: calc(0.35rem + env(safe-area-inset-top, 0px));
+    left: calc(0.4rem + env(safe-area-inset-left, 0px));
+    right: auto;
+    bottom: auto;
+  }
+
+  body.touch-ui .lock-status {
+    top: 2.4rem;
+    font-size: 0.6rem;
+    padding: 0.2rem 0.55rem;
+  }
+}
+
+/* Portrait: force landscape to play */
+#rotate-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 18, 32, 0.94);
+  pointer-events: auto;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+#rotate-lock.hidden {
+  display: none !important;
+}
+
+.rotate-lock-card {
+  max-width: 280px;
+}
+
+.rotate-lock-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+  animation: rotateHint 1.6s ease-in-out infinite;
+}
+
+.rotate-lock-card p {
+  font-weight: 800;
+  font-size: 1.1rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+@keyframes rotateHint {
+  0%, 100% { transform: rotate(0deg); }
+  40% { transform: rotate(90deg); }
+  60% { transform: rotate(90deg); }
+}
+
+.nav-back {
+  position: fixed;
+  top: calc(0.45rem + env(safe-area-inset-top, 0px));
+  left: calc(0.45rem + env(safe-area-inset-left, 0px));
+  z-index: 80;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  background: rgba(10, 28, 44, 0.82);
+  color: #f0f6ff;
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.nav-back.hidden {
+  display: none;
+}
+
+body.touch-ui .nav-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+body.touch-ui .nav-back.hidden {
+  display: none;
+}
+
+/* Portrait overlay — hide game chrome when landscape is required */
+body.touch-ui.force-landscape.portrait-locked #rotate-lock {
+  display: flex !important;
+}
+
+body.touch-ui.force-landscape.portrait-locked #touch,
+body.touch-ui.force-landscape.portrait-locked #hud,
+body.touch-ui.force-landscape.portrait-locked #options,
+body.touch-ui.force-landscape.portrait-locked #multiplayer,
+body.touch-ui.force-landscape.portrait-locked #pause,
+body.touch-ui.force-landscape.portrait-locked #results,
+body.touch-ui.force-landscape.portrait-locked #mp-host-modal {
+  visibility: hidden;
+}
+
+/* Keep in-app back so user can leave without Android system back */
+body.touch-ui.force-landscape.portrait-locked #nav-back:not(.hidden) {
+  visibility: visible;
+  display: flex;
+  z-index: 95;
+}
+
+/* Main menu may stay portrait */
+body.touch-ui.menu-portrait-ok #menu {
+  visibility: visible;
 }
 
 .auth-error { color: #f87171; font-size: 0.85rem; margin: 0.5rem 0; }

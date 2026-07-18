@@ -45,12 +45,34 @@ Default admin (change in `.env` before production):
 | Email | `admin@pokyplane.local` |
 | Password | `Admin123!` |
 
-Production build:
+Production build (local):
 
 ```bash
 npm run build
-npm run preview
+NODE_ENV=production PORT=3000 DATABASE_URL=... npm start
 ```
+
+### Deploy on Liara
+
+1. Create a **PostgreSQL** database in Liara and copy its connection URI.
+2. In the app’s Environment Variables set at least:
+
+| Variable | Example |
+|----------|---------|
+| `DATABASE_URL` | `postgresql://user:pass@host:5432/db` |
+| `NODE_ENV` | `production` |
+| `CLIENT_ORIGIN` | `https://pokyplane.liara.run` |
+| `JWT_ACCESS_SECRET` | long random string |
+| `JWT_REFRESH_SECRET` | long random string |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | your admin login |
+
+3. Deploy:
+
+```bash
+liara deploy
+```
+
+`npm start` serves the Vite build from Express on the app port (default **3000**). Do not use `dev` / Vite on Liara.
 
 ## Accounts & security
 

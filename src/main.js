@@ -66,6 +66,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2500);
 
 const sound = new SoundEngine();
+sound.setPlaneTypes(PLANE_TYPES);
 const match = new Matchmaking();
 const mpHub = new MpHub(match);
 const input = new Input();
@@ -502,6 +503,7 @@ function clearRemotePlane() {
     remotePlane = null;
     remoteParts = null;
   }
+  sound.removeRemoteEngine('peer');
   remoteInterp._gotState = false;
   remoteInterp.health = 100;
 }
@@ -636,8 +638,10 @@ function startGame(mode, mapOverride = null) {
   tryEnterFullscreen();
   hud.show(true);
   sound.stopAmbient();
-  sound.startEngine();
+  const planeType = getPlaneType(planeTypeIndex);
+  sound.startEngine(planeType?.id || planeTypeIndex, planeType?.tag);
   sound.startWind();
+  sound.setMusicState(mode === 'combat' ? 'combat' : 'flight');
   particles.setSmoke(settings.smoke);
 
   startPresenceLoop(() => ({
@@ -675,6 +679,13 @@ function endGame(title, body) {
   world?.disableStreaming?.();
   sound.setStall(false);
   sound.stopEngine();
+  sound.stopWind();
+  sound.clearRemoteEngines();
+  const win =
+    /win|clear|course/i.test(String(title)) ||
+    title === t('youWin') ||
+    title === t('courseClear');
+  sound.setMusicState(win ? 'victory' : 'defeat');
   stopPresenceLoop();
 
   const scoreVal =
@@ -707,7 +718,10 @@ function quitToMenu() {
   clearRemotePlane();
   document.getElementById('hud-chat')?.classList.add('hidden');
   sound.stopEngine();
+  sound.stopWind();
   sound.setStall(false);
+  sound.clearRemoteEngines();
+  sound.setMusicState('menu');
   sound.startAmbient();
   if (planeGroup) {
     scene.remove(planeGroup);
@@ -1307,14 +1321,14 @@ match.onEvent = (ev) => {
     if (amt <= 0) return;
     flight.takeDamage(amt);
     if (settings.camShake) camRig.addShake(0.22);
-    sound.playUI('success');
+    sound.playHit();
   } else if (ev.type === 'fire') {
     if (!weapons) return;
     const origin = new THREE.Vector3(ev.x, ev.y, ev.z);
     const dir = new THREE.Vector3(ev.dx, ev.dy, ev.dz);
     const wpn = ev.weapon || 'mg';
     if (WEAPON_DEFS[wpn]?.sound === 'rocket') sound.playRocket();
-    else sound.playGunfire();
+    else sound.playGunfire(wpn === 'cannon' ? 'cannon' : 'mg');
     let lockTarget = null;
     if (ev.lockId != null && ev.lockKind) {
       // Sender locked 'peer' (you); remap so local homing resolves against self.
@@ -1520,6 +1534,9 @@ function selectPlane(index) {
   localStorage.setItem('pokyplane_plane', String(planeTypeIndex));
   updatePlanePickerUi();
   if (state === 'menu') buildMenuPlane();
+  const pt = getPlaneType(planeTypeIndex);
+  sound.setEnginePlane(pt?.id || planeTypeIndex, pt?.tag);
+  if (state === 'menu') sound.setMusicState('hangar');
 }
 
 document.querySelectorAll('.plane-btn').forEach((btn) => {
@@ -1586,7 +1603,10 @@ window.addEventListener(
   'pointerdown',
   async () => {
     await unlockAudio();
-    if (state === 'menu') sound.startAmbient();
+    if (state === 'menu') {
+      sound.setMusicState('menu');
+      sound.startAmbient();
+    }
   },
   { once: true }
 );
@@ -1696,6 +1716,14 @@ function updateMultiplayer(dt, fi) {
     onGround: false,
   }, dt);
 
+  sound.updateRemoteEngine('peer', {
+    x: remoteInterp.pos.x,
+    y: remoteInterp.pos.y,
+    z: remoteInterp.pos.z,
+    throttle: remoteInterp.throttle,
+    planeId: remoteInterp.skin,
+  });
+
   match.sendState({
     x: flight.position.x,
     y: flight.position.y,
@@ -1717,7 +1745,7 @@ function updateMultiplayer(dt, fi) {
   if (flight.crashed || flight.health <= 0) {
     match.sendEvent({ type: 'died' });
     particles.burstExplosion(flight.position);
-    sound.playExplosion(flight.position.x, flight.position.y, flight.position.z);
+    sound.playCrash(flight.position.x, flight.position.y, flight.position.z);
     endGame(t('youLose'), t('youCrashed'));
   }
 }
@@ -1731,10 +1759,10 @@ function handleWeaponImpact({ target, damage, point, owner, weapon }) {
   particles.emitImpactExplosion(p, { weapon: w });
 
   if (w === 'missile' || w === 'rocket') {
-    sound.playExplosion(p.x, p.y, p.z);
+    sound.playExplosion(p.x, p.y, p.z, w === 'missile' ? 1.4 : 1.1);
     if (settings.camShake) camRig.addShake(w === 'missile' ? 0.24 : 0.18);
   } else if (w === 'cannon') {
-    sound.playExplosion(p.x, p.y, p.z);
+    sound.playExplosion(p.x, p.y, p.z, 0.7);
     if (settings.camShake) camRig.addShake(0.07);
   } else if (w === 'mg') {
     if (settings.camShake) camRig.addShake(0.012);
@@ -1951,7 +1979,7 @@ function tryFire(fi, hitTargets) {
   });
   if (!shot) return;
   if (weapons.active.sound === 'rocket') sound.playRocket();
-  else sound.playGunfire();
+  else sound.playGunfire(weapons.activeId === 'cannon' ? 'cannon' : 'mg');
   camRig.addShake(settings.camShake ? (weapons.activeId === 'mg' ? 0.03 : 0.08) : 0);
 
   if (gameMode === 'multiplayer' && match.isConnected) {
@@ -2017,7 +2045,7 @@ function updatePlaying(dt) {
     const got = fuelDrops.update(dt, flight.position, (x, z) => world.getHeight(x, z));
     if (got) {
       flight.addFuel(got.amount);
-      sound.playUI('success');
+      sound.playFuelPickup();
       hud.toast(`+${Math.round(got.amount)} ${t('fuel')}`);
       particles?.ringSparkle(flight.position);
     }
@@ -2060,8 +2088,28 @@ function updatePlaying(dt) {
     particles.update(dt, true, flight.position);
   }
 
-  sound.updateEngine(flight.throttle);
-  sound.updateWind(flight.airspeed / flight.maxSpeed);
+  const groundY = world.getHeight(flight.position.x, flight.position.z);
+  const agl = Math.max(0, flight.position.y - groundY);
+  const airspeedNorm = flight.airspeed / Math.max(1, flight.maxSpeed);
+  sound.updateEngine({
+    throttle: flight.throttle,
+    airspeedNorm,
+    boost: !!fi.boost,
+    stalling: flight.stalling,
+    spinning: flight.spinning,
+    grounded: flight.onGround,
+    fuelNorm: flight.fuelMax > 0 ? flight.fuel / flight.fuelMax : 1,
+    outOfFuel: flight.outOfFuel,
+    agl,
+    verticalSpeed: flight.velocity.y,
+  });
+  sound.updateWind({
+    airspeedNorm,
+    stalling: flight.stalling,
+    spinning: flight.spinning,
+    grounded: flight.onGround,
+    agl,
+  });
   sound.setStall(flight.stalling || flight.spinning);
   sound.setListener(
     camera.position.x,
@@ -2086,6 +2134,7 @@ function updatePlaying(dt) {
       (dmg) => {
         const mods = difficultyMods(settings.difficulty);
         flight.takeDamage(dmg * mods.damageScale);
+        sound.playHit();
         if (settings.camShake) camRig.addShake(0.14);
       },
       getIncomingMissiles(),
@@ -2117,6 +2166,7 @@ function updatePlaying(dt) {
         if (target.ref.hit(damage)) {
           if (combat) combat.score += 250;
           hud.toast(t('enemyDown'));
+          sound.playScore();
           if (targetLock.lockId === target.ref.id) targetLock.clear();
         }
       } else if (target.kind === 'peer') {
@@ -2127,6 +2177,7 @@ function updatePlaying(dt) {
           gameMode === 'multiplayer' ? mpLobby.difficulty : settings.difficulty
         );
         flight.takeDamage(damage * mods.damageScale);
+        sound.playHit();
         if (settings.camShake) camRig.addShake(0.28);
       }
     },
@@ -2164,7 +2215,7 @@ function updatePlaying(dt) {
   if (gameMode === 'race' && race) {
     race.update(dt, flight.position, (pos) => {
       particles.ringSparkle(pos);
-      sound.playUI('ring');
+      sound.playScore();
       hud.toast('+RING!');
     });
     score = race.score;
@@ -2188,7 +2239,7 @@ function updatePlaying(dt) {
     }
     if (race.failed || flight.crashed) {
       particles.burstExplosion(flight.position);
-      sound.playExplosion(flight.position.x, flight.position.y, flight.position.z);
+      sound.playCrash(flight.position.x, flight.position.y, flight.position.z);
       endGame(t('runOver'), flight.crashed ? t('youCrashed') : t('timeExpired'));
       return;
     }
@@ -2239,7 +2290,7 @@ function updatePlaying(dt) {
 
   if (flight.crashed && gameMode !== 'race' && gameMode !== 'multiplayer') {
     particles.burstExplosion(flight.position);
-    sound.playExplosion(flight.position.x, flight.position.y, flight.position.z);
+    sound.playCrash(flight.position.x, flight.position.y, flight.position.z);
     if (settings.camShake) camRig.addShake(0.8);
     endGame(t('crashed'), `${Math.floor(flightTime)}s · ${t('score')} ${score}`);
     return;

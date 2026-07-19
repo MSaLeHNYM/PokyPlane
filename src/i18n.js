@@ -295,6 +295,7 @@ const dict = {
     inboxKindInvite: 'Lobby invite',
     inboxKindAdmin: 'Admin',
     inboxLocked: 'This message cannot be deleted',
+    inboxPinned: 'Pinned',
     selected: 'selected',
     markRead: 'Mark read',
     markUnread: 'Mark unread',
@@ -322,6 +323,8 @@ const dict = {
     invite: 'Invite',
     invited: 'Invited',
     inviteFailed: 'Invite failed.',
+    inviteCooldown: 'Wait {n}s',
+    disconnectBeforeHost: 'Disconnect from the current lobby or match before hosting a new game.',
     loading: 'Loading…',
   },
   fa: {
@@ -612,6 +615,7 @@ const dict = {
     inboxKindInvite: 'دعوت لابی',
     inboxKindAdmin: 'ادمین',
     inboxLocked: 'این پیام قابل حذف نیست',
+    inboxPinned: 'پین',
     selected: 'انتخاب‌شده',
     markRead: 'خوانده‌شده',
     markUnread: 'خوانده‌نشده',
@@ -639,6 +643,8 @@ const dict = {
     invite: 'دعوت',
     invited: 'دعوت شد',
     inviteFailed: 'دعوت ناموفق بود.',
+    inviteCooldown: '{n} ثانیه صبر کن',
+    disconnectBeforeHost: 'قبل از میزبانی جدید، از لابی یا مسابقه فعلی قطع شو.',
     loading: 'در حال بارگذاری…',
   },
 };

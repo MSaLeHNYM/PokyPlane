@@ -38,6 +38,7 @@
       <button type="button" class="tab" data-tab="users">Users</button>
       <button type="button" class="tab" data-tab="announcement">Announcement</button>
       <button type="button" class="tab" data-tab="messages">Messages</button>
+      <button type="button" class="tab" data-tab="push">Android Push</button>
       <button type="button" class="tab" data-tab="ipbans">IP Bans</button>
       <button type="button" class="tab" data-tab="security">Security Log</button>
     </nav>
@@ -119,13 +120,78 @@
           </div>
         </form>
         <h3 class="subhead">Recent admin sends</h3>
-        <button type="button" class="refresh" data-refresh="messages">Refresh</button>
+        <div class="recent-toolbar">
+          <div class="recent-filters" role="group" aria-label="Filter by lock">
+            <button type="button" class="filter-chip active" data-inbox-recent-filter="all">All</button>
+            <button type="button" class="filter-chip" data-inbox-recent-filter="locked">Locked</button>
+            <button type="button" class="filter-chip" data-inbox-recent-filter="unlocked">Unlocked</button>
+          </div>
+          <button type="button" class="refresh" data-refresh="messages">Refresh</button>
+        </div>
+        <div id="inbox-recent-bulk" class="recent-bulk-bar hidden">
+          <span><span id="inbox-recent-selected-count">0</span> selected</span>
+          <button type="button" class="btn-sm" id="inbox-recent-resend">Re-send</button>
+          <button type="button" class="btn-sm btn-warn" id="inbox-recent-bulk-delete">Delete</button>
+        </div>
         <table>
           <thead>
-            <tr><th>When</th><th>Title</th><th>Recipients</th><th>Deletable</th></tr>
+            <tr>
+              <th><input type="checkbox" id="inbox-recent-select-all" title="Select all visible" /></th>
+              <th>When</th>
+              <th>Title</th>
+              <th>Recipients</th>
+              <th>Deletable</th>
+              <th></th>
+            </tr>
           </thead>
           <tbody id="inbox-recent-body"></tbody>
         </table>
+      </div>
+
+      <div id="tab-push" class="tab-pane hidden">
+        <p class="pane-desc">
+          ارسال اعلان اندروید (Web Push) برای بازیکنانی که اپ را نصب کرده و اجازه نوتیفیکیشن داده‌اند.
+          روی نوتیف، لوگوی بازی و متن پیام نمایش داده می‌شود.
+        </p>
+        <p id="push-stats" class="muted-note">Subscriptions: —</p>
+        <button type="button" class="refresh" data-refresh="push">Refresh stats</button>
+
+        <h3 class="subhead">نمونه‌های فارسی — کلیک کن تا فرم پر شود</h3>
+        <div id="push-samples" class="push-samples" dir="rtl" lang="fa"></div>
+
+        <form id="push-form" class="announce-form">
+          <fieldset class="mode-fieldset">
+            <legend>Delivery</legend>
+            <label class="check-row">
+              <input type="radio" name="push-mode" value="broadcast" checked />
+              <span>Broadcast to all subscribed devices</span>
+            </label>
+            <label class="check-row">
+              <input type="radio" name="push-mode" value="single" />
+              <span>Single user</span>
+            </label>
+          </fieldset>
+          <label id="push-user-wrap" class="hidden">
+            Recipient user ID
+            <input type="text" id="push-user-id" placeholder="UUID from Users tab" />
+          </label>
+          <label>
+            Title (عنوان)
+            <input type="text" id="push-title" maxlength="120" required dir="auto" placeholder="عنوان اعلان" />
+          </label>
+          <label>
+            Body (متن)
+            <textarea id="push-body" rows="3" maxlength="400" dir="auto" placeholder="متن اعلان…"></textarea>
+          </label>
+          <label>
+            Open URL (optional)
+            <input type="text" id="push-url" placeholder="/" value="/" />
+          </label>
+          <div class="form-actions">
+            <button type="submit">Send Android notification</button>
+            <span id="push-status" class="status-msg hidden"></span>
+          </div>
+        </form>
       </div>
 
       <div id="tab-ipbans" class="tab-pane hidden">

@@ -5,6 +5,8 @@ import {
   countUnread,
   markInboxRead,
   deleteInboxMessages,
+  consumeLobbyInvite,
+  consumeLobbyInvitesForRoom,
 } from '../models/inbox.js';
 
 const router = Router();
@@ -61,6 +63,24 @@ router.post('/delete', async (req, res, next) => {
     const result = await deleteInboxMessages(req.auth.userId, ids);
     const unreadCount = await countUnread(req.auth.userId);
     res.json({ ...result, unreadCount });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** After joining a lobby from inbox: remove that invite (and any dupes for the room). */
+router.post('/consume-lobby-invite', async (req, res, next) => {
+  try {
+    const { id, roomId } = req.body || {};
+    let deleted = 0;
+    if (id) {
+      deleted += (await consumeLobbyInvite(req.auth.userId, id)).deleted;
+    }
+    if (roomId) {
+      deleted += (await consumeLobbyInvitesForRoom(req.auth.userId, roomId)).deleted;
+    }
+    const unreadCount = await countUnread(req.auth.userId);
+    res.json({ deleted, unreadCount });
   } catch (e) {
     next(e);
   }

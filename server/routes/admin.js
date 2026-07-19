@@ -16,7 +16,15 @@ import {
   createInboxMessage,
   broadcastAdminMessage,
   listRecentAdminSends,
+  forceDeleteInboxByIds,
+  forceDeleteAdminBatch,
 } from '../models/inbox.js';
+import {
+  sendPushNotification,
+  countSubscriptions,
+  isPushConfigured,
+  ensurePushConfigured,
+} from '../models/push.js';
 
 const router = Router();
 
@@ -338,6 +346,68 @@ router.get('/inbox/recent', async (req, res, next) => {
     const recent = await listRecentAdminSends(req.query.limit);
     res.json({ recent });
   } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/inbox/force-delete', async (req, res, next) => {
+  try {
+    const { ids, title, body, createdAt, allowDelete } = req.body || {};
+    let result;
+    if (Array.isArray(ids) && ids.length) {
+      result = await forceDeleteInboxByIds(ids);
+    } else {
+      result = await forceDeleteAdminBatch({ title, body, createdAt, allowDelete });
+    }
+    await logSecurityEvent('admin_inbox_force_delete', {
+      userId: req.auth.userId,
+      ip: getClientIp(req),
+      details: {
+        deleted: result.deleted,
+        byIds: Array.isArray(ids) && ids.length > 0,
+        title: title ? String(title).slice(0, 120) : null,
+      },
+    });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.code || 'error', message: e.message });
+    next(e);
+  }
+});
+
+router.get('/push/stats', async (_req, res, next) => {
+  try {
+    ensurePushConfigured();
+    const subscriptions = await countSubscriptions();
+    res.json({ configured: isPushConfigured(), subscriptions });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/push', async (req, res, next) => {
+  try {
+    const { userId, broadcast, title, body, url } = req.body || {};
+    const result = await sendPushNotification({
+      title,
+      body: body || '',
+      url: url || '/',
+      userId: broadcast ? null : userId,
+      broadcast: !!broadcast,
+    });
+    await logSecurityEvent('admin_push_send', {
+      userId: req.auth.userId,
+      ip: getClientIp(req),
+      details: {
+        title: String(title || '').slice(0, 120),
+        broadcast: !!broadcast,
+        targetUserId: userId || null,
+        ...result,
+      },
+    });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.code || 'error', message: e.message });
     next(e);
   }
 });

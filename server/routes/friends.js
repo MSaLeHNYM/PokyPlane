@@ -14,6 +14,29 @@ import {
 const router = Router();
 router.use(authMiddleware);
 
+/** Host → friend lobby invite cooldown (ms). */
+const LOBBY_INVITE_COOLDOWN_MS = 20_000;
+/** @type {Map<string, number>} */
+const lobbyInviteCooldownUntil = new Map();
+
+function assertLobbyInviteCooldown(userId) {
+  const until = lobbyInviteCooldownUntil.get(userId) || 0;
+  const now = Date.now();
+  if (until > now) {
+    const err = new Error(
+      `Please wait ${Math.ceil((until - now) / 1000)}s before sending another invite.`
+    );
+    err.code = 'cooldown';
+    err.status = 429;
+    err.retryAfterSec = Math.ceil((until - now) / 1000);
+    throw err;
+  }
+}
+
+function markLobbyInviteCooldown(userId) {
+  lobbyInviteCooldownUntil.set(userId, Date.now() + LOBBY_INVITE_COOLDOWN_MS);
+}
+
 router.get('/', async (req, res, next) => {
   try {
     const friends = await listFriends(req.auth.userId);
@@ -82,14 +105,25 @@ router.delete('/:friendId', async (req, res, next) => {
 
 router.post('/:friendId/lobby-invite', async (req, res, next) => {
   try {
+    assertLobbyInviteCooldown(req.auth.userId);
     const { roomId, inviteUrl } = req.body || {};
     const message = await sendLobbyInvite(req.auth.userId, req.params.friendId, {
       roomId,
       inviteUrl,
     });
-    res.status(201).json({ message });
+    markLobbyInviteCooldown(req.auth.userId);
+    res.status(201).json({
+      message,
+      cooldownSec: LOBBY_INVITE_COOLDOWN_MS / 1000,
+    });
   } catch (e) {
-    if (e.status) return res.status(e.status).json({ error: e.code || 'error', message: e.message });
+    if (e.status) {
+      return res.status(e.status).json({
+        error: e.code || 'error',
+        message: e.message,
+        retryAfterSec: e.retryAfterSec,
+      });
+    }
     next(e);
   }
 });

@@ -1,5 +1,5 @@
-/* PokyPlane service worker — cache shell for installed PWA */
-const CACHE = 'pokyplane-v1';
+/* PokyPlane service worker — cache shell + Web Push notifications */
+const CACHE = 'pokyplane-v2';
 const PRECACHE = [
   './',
   './index.html',
@@ -49,6 +49,63 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => cached);
       return cached || network;
+    })
+  );
+});
+
+self.addEventListener('push', (event) => {
+  let data = {
+    title: 'PokyPlane',
+    body: '',
+    icon: '/icon-192.png',
+    badge: '/favicon.png',
+    image: '/logo.png',
+    url: '/',
+    tag: 'pokyplane',
+  };
+  try {
+    if (event.data) {
+      const parsed = event.data.json();
+      data = { ...data, ...parsed };
+    }
+  } catch {
+    try {
+      const text = event.data?.text();
+      if (text) data.body = text;
+    } catch {
+      /* */
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'PokyPlane', {
+      body: data.body || '',
+      icon: data.icon || '/icon-192.png',
+      badge: data.badge || '/favicon.png',
+      image: data.image || '/logo.png',
+      tag: data.tag || 'pokyplane',
+      renotify: true,
+      data: { url: data.url || '/' },
+      dir: 'auto',
+      lang: 'fa',
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = event.notification?.data?.url || '/';
+  const abs = new URL(target, self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.navigate?.(abs);
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(abs);
+      return undefined;
     })
   );
 });

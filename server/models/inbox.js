@@ -61,7 +61,7 @@ export async function listInbox(userId, { limit = 50, unreadOnly = false } = {})
      FROM inbox_messages m
      LEFT JOIN users u ON u.id = m.from_user_id
      WHERE ${where}
-     ORDER BY m.created_at DESC
+     ORDER BY m.allow_delete ASC, m.created_at DESC
      LIMIT $${params.length}`,
     params
   );
@@ -102,6 +102,66 @@ export async function deleteInboxMessages(userId, ids) {
     [userId, list]
   );
   return { deleted: rowCount || 0, skipped };
+}
+
+/** Delete a lobby invite after the recipient joins (always allowed for that row). */
+export async function consumeLobbyInvite(userId, messageId) {
+  if (!messageId) return { deleted: 0 };
+  const { rowCount } = await query(
+    `DELETE FROM inbox_messages
+     WHERE id = $1 AND user_id = $2 AND kind = 'lobby_invite'`,
+    [messageId, userId]
+  );
+  return { deleted: rowCount || 0 };
+}
+
+/** Remove all invites for a room for this user (e.g. after successful join). */
+export async function consumeLobbyInvitesForRoom(userId, roomId) {
+  const room = String(roomId || '').trim();
+  if (!room) return { deleted: 0 };
+  const { rowCount } = await query(
+    `DELETE FROM inbox_messages
+     WHERE user_id = $1
+       AND kind = 'lobby_invite'
+       AND (payload->>'roomId') = $2`,
+    [userId, room]
+  );
+  return { deleted: rowCount || 0 };
+}
+
+/** Admin: delete by ids regardless of allow_delete. */
+export async function forceDeleteInboxByIds(ids) {
+  const list = Array.isArray(ids) ? ids.filter(Boolean) : [];
+  if (!list.length) return { deleted: 0 };
+  const { rowCount } = await query(
+    `DELETE FROM inbox_messages WHERE id = ANY($1::uuid[])`,
+    [list]
+  );
+  return { deleted: rowCount || 0 };
+}
+
+/**
+ * Admin: remove a whole admin send batch (including locked).
+ * Matches title + body + created_at + allow_delete like listRecentAdminSends groups.
+ */
+export async function forceDeleteAdminBatch({ title, body = '', createdAt, allowDelete }) {
+  if (!title || !createdAt) {
+    const err = new Error('title and createdAt required.');
+    err.status = 400;
+    err.code = 'validation';
+    throw err;
+  }
+  const allow = allowDelete !== false && allowDelete !== 'false';
+  const { rowCount } = await query(
+    `DELETE FROM inbox_messages
+     WHERE kind = 'admin'
+       AND title = $1
+       AND COALESCE(body, '') = $2
+       AND allow_delete = $3
+       AND created_at = $4::timestamptz`,
+    [String(title), String(body || ''), allow, createdAt]
+  );
+  return { deleted: rowCount || 0 };
 }
 
 /** Mark friend-request inbox rows for this request as read (and optionally annotate payload). */

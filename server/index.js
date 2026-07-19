@@ -17,6 +17,7 @@ import announcementRoutes from './routes/announcement.js';
 import mpRoutes from './routes/mp.js';
 import friendsRoutes from './routes/friends.js';
 import inboxRoutes from './routes/inbox.js';
+import pushRoutes from './routes/push.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -53,6 +54,7 @@ app.use('/api/presence', presenceRoutes);
 app.use('/api/announcement', announcementRoutes);
 app.use('/api/friends', friendsRoutes);
 app.use('/api/inbox', inboxRoutes);
+app.use('/api/push', pushRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/mp', mpRoutes);
 
@@ -75,7 +77,13 @@ const distDir = path.join(__dirname, '..', 'dist');
 if (config.nodeEnv === 'production') {
   app.use(express.static(distDir));
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/peerjs')) return next();
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/peerjs') ||
+      req.path.startsWith('/admin')
+    ) {
+      return next();
+    }
     res.sendFile(path.join(distDir, 'index.html'), (err) => {
       if (err) next(err);
     });

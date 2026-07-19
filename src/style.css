@@ -2697,6 +2697,7 @@ html.lang-fa .modal-panel select {
 @media (orientation: landscape) and (min-width: 900px) {
   body:not(.touch-ui) #options.screen,
   body:not(.touch-ui) #multiplayer.screen,
+  body:not(.touch-ui) #inbox.screen,
   body:not(.touch-ui) #pause.screen,
   body:not(.touch-ui) #results.screen {
     align-items: stretch;
@@ -2833,6 +2834,96 @@ html.lang-fa .modal-panel select {
     flex-wrap: nowrap;
   }
 
+  /* Inbox — 1920×1080 desktop fit-shell, no outer scroll */
+  body:not(.touch-ui) #inbox .panel.inbox-shell {
+    width: min(100%, 1100px);
+    max-height: calc(100dvh - 1.7rem);
+    margin: 0 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 1.25rem;
+    gap: 0.45rem;
+    box-sizing: border-box;
+  }
+
+  body:not(.touch-ui) #inbox .panel.inbox-shell > h2,
+  body:not(.touch-ui) #inbox .panel.inbox-shell > .panel-desc,
+  body:not(.touch-ui) #inbox .inbox-footer-back {
+    flex-shrink: 0;
+  }
+
+  body:not(.touch-ui) #inbox .panel.inbox-shell > h2 {
+    font-size: clamp(1.25rem, 2.2vh, 1.6rem);
+    margin: 0.2rem 0;
+  }
+
+  body:not(.touch-ui) #inbox .panel.inbox-shell > .panel-desc {
+    margin: 0 0 0.15rem;
+    font-size: 0.9rem;
+    line-height: 1.3;
+  }
+
+  body:not(.touch-ui) #inbox .inbox-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(12rem, 0.85fr);
+    gap: 0.85rem;
+    align-items: stretch;
+  }
+
+  body:not(.touch-ui) #inbox .inbox-main,
+  body:not(.touch-ui) #inbox .inbox-friends {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:not(.touch-ui) #inbox .inbox-filters,
+  body:not(.touch-ui) #inbox .inbox-bulk-bar,
+  body:not(.touch-ui) #inbox .inbox-select-all-row {
+    flex-shrink: 0;
+    margin-bottom: 0.45rem;
+  }
+
+  body:not(.touch-ui) #inbox #inbox-list,
+  body:not(.touch-ui) #inbox .inbox-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+    gap: 0.4rem;
+  }
+
+  body:not(.touch-ui) #inbox .inbox-friends > .mp-section-title,
+  body:not(.touch-ui) #inbox .friends-search-row {
+    flex-shrink: 0;
+  }
+
+  body:not(.touch-ui) #inbox .friends-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  body:not(.touch-ui) #inbox .friends-search-results,
+  body:not(.touch-ui) #inbox .friends-list {
+    margin-bottom: 0;
+  }
+
+  body:not(.touch-ui) #inbox .inbox-footer-back {
+    width: auto;
+    align-self: flex-start;
+    margin-top: 0.15rem;
+  }
+
   /* Pause / Results */
   body:not(.touch-ui) #pause .panel,
   body:not(.touch-ui) #results .panel {
@@ -2958,14 +3049,29 @@ html.lang-fa .modal-panel select {
 @media (orientation: landscape) and (min-width: 900px) and (max-height: 800px) {
   body:not(.touch-ui) #options.screen,
   body:not(.touch-ui) #multiplayer.screen,
+  body:not(.touch-ui) #inbox.screen,
   body:not(.touch-ui) #pause.screen,
   body:not(.touch-ui) #results.screen {
     padding: 0.5rem 0.85rem;
   }
 
   body:not(.touch-ui) #options .settings-shell,
-  body:not(.touch-ui) #multiplayer .panel {
+  body:not(.touch-ui) #multiplayer .panel,
+  body:not(.touch-ui) #inbox .panel.inbox-shell {
     max-height: calc(100dvh - 1rem);
+  }
+
+  body:not(.touch-ui) #inbox .panel.inbox-shell {
+    padding: 0.7rem 0.95rem;
+    gap: 0.3rem;
+  }
+
+  body:not(.touch-ui) #inbox .inbox-layout {
+    gap: 0.55rem;
+  }
+
+  body:not(.touch-ui) #inbox .panel.inbox-shell > .panel-desc {
+    font-size: 0.82rem;
   }
 
   body:not(.touch-ui) #options .settings-header,
@@ -3290,6 +3396,7 @@ html.lang-fa .modal-panel select {
   /* Shared: screens never scroll the page */
   body.touch-ui #options.screen,
   body.touch-ui #multiplayer.screen,
+  body.touch-ui #inbox.screen,
   body.touch-ui #pause.screen,
   body.touch-ui #results.screen {
     align-items: stretch;
@@ -3783,6 +3890,196 @@ html.lang-fa .modal-panel select {
     margin-bottom: 0.25rem;
   }
 
+  /* Inbox — 1920×1080 landscape fit-shell, no outer scroll */
+  body.touch-ui #inbox .panel.inbox-shell {
+    width: min(100%, 1100px);
+    height: calc(100dvh - 0.8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 0.8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    margin: 0 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0.55rem 0.85rem 0.6rem;
+    gap: 0.35rem;
+    box-sizing: border-box;
+  }
+
+  body.touch-ui #inbox .panel.inbox-shell > h2 {
+    flex-shrink: 0;
+    font-size: clamp(1rem, 2.1vh, 1.3rem);
+    margin: 0;
+    padding-inline-start: 2.75rem;
+  }
+
+  body.touch-ui #inbox .panel.inbox-shell > .panel-desc,
+  body.touch-ui #inbox .inbox-footer-back {
+    display: none;
+  }
+
+  body.touch-ui #inbox .inbox-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(10rem, 0.85fr);
+    gap: 0.55rem;
+    align-items: stretch;
+  }
+
+  body.touch-ui #inbox .inbox-main,
+  body.touch-ui #inbox .inbox-friends {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body.touch-ui #inbox .inbox-filters,
+  body.touch-ui #inbox .inbox-bulk-bar,
+  body.touch-ui #inbox .inbox-select-all-row {
+    flex-shrink: 0;
+    margin-bottom: 0.35rem;
+  }
+
+  body.touch-ui #inbox .inbox-filters {
+    gap: 0.25rem;
+  }
+
+  body.touch-ui #inbox .inbox-filters .sb-tab {
+    padding: 0.28rem 0.5rem;
+    font-size: 0.72rem;
+  }
+
+  body.touch-ui #inbox .inbox-bulk-bar {
+    gap: 0.3rem;
+    font-size: 0.78rem;
+  }
+
+  body.touch-ui #inbox .inbox-bulk-bar .menu-btn {
+    padding: 0.28rem 0.45rem;
+    font-size: 0.72rem;
+  }
+
+  body.touch-ui #inbox .inbox-select-all-row {
+    font-size: 0.78rem;
+    margin-bottom: 0.3rem;
+  }
+
+  body.touch-ui #inbox #inbox-list,
+  body.touch-ui #inbox .inbox-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.35rem;
+  }
+
+  body.touch-ui #inbox .inbox-row {
+    padding: 0.35rem 0.45rem;
+    border-radius: 8px;
+    gap: 0.4rem;
+  }
+
+  body.touch-ui #inbox .inbox-row-meta {
+    font-size: 0.65rem;
+    margin-bottom: 0.1rem;
+  }
+
+  body.touch-ui #inbox .inbox-title {
+    font-size: 0.85rem;
+    margin-bottom: 0.1rem;
+  }
+
+  body.touch-ui #inbox .inbox-body {
+    font-size: 0.78rem;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    white-space: normal;
+  }
+
+  body.touch-ui #inbox .inbox-row-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.3rem;
+  }
+
+  body.touch-ui #inbox .inbox-row-actions .menu-btn {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.7rem;
+  }
+
+  body.touch-ui #inbox .inbox-friends > .mp-section-title,
+  body.touch-ui #inbox .friends-search-row {
+    flex-shrink: 0;
+  }
+
+  body.touch-ui #inbox .inbox-friends > .mp-section-title {
+    margin: 0 0 0.35rem;
+    font-size: 0.9rem;
+  }
+
+  body.touch-ui #inbox .friends-search-row {
+    margin-bottom: 0.35rem;
+    gap: 0.3rem;
+  }
+
+  body.touch-ui #inbox .friends-search-row input {
+    min-height: 2.2rem;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8rem;
+  }
+
+  body.touch-ui #inbox .friends-search-row .menu-btn {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.72rem;
+  }
+
+  body.touch-ui #inbox .friends-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  body.touch-ui #inbox .friends-search-results,
+  body.touch-ui #inbox .friends-list {
+    margin-bottom: 0;
+    gap: 0.3rem;
+  }
+
+  body.touch-ui #inbox .friends-row {
+    padding: 0.3rem 0.4rem;
+    font-size: 0.8rem;
+    gap: 0.35rem;
+  }
+
+  body.touch-ui #inbox .friends-row .menu-btn {
+    padding: 0.25rem 0.4rem;
+    font-size: 0.7rem;
+  }
+
+  body.touch-ui #mp-invite-friend-modal .modal-panel {
+    width: min(100%, 520px);
+    max-height: calc(100dvh - 1.1rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow: hidden;
+  }
+
+  body.touch-ui #mp-invite-friend-modal #mp-invite-friend-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   body.touch-ui .avatar-grid {
     max-height: min(28vh, 180px);
     overflow-y: auto;
@@ -3824,6 +4121,25 @@ html.lang-fa .modal-panel select {
   body.touch-ui #multiplayer .panel > h2 {
     font-size: 0.95rem;
     padding-inline-start: 2.5rem;
+  }
+
+  body.touch-ui #inbox .panel.inbox-shell {
+    padding: 0.4rem 0.6rem 0.45rem;
+    gap: 0.25rem;
+  }
+
+  body.touch-ui #inbox .panel.inbox-shell > h2 {
+    font-size: 0.95rem;
+    padding-inline-start: 2.5rem;
+  }
+
+  body.touch-ui #inbox .inbox-layout {
+    gap: 0.4rem;
+  }
+
+  body.touch-ui #inbox .inbox-filters .sb-tab {
+    padding: 0.22rem 0.4rem;
+    font-size: 0.68rem;
   }
 
   body.touch-ui #multiplayer #mp-lobby-panel {
@@ -4299,6 +4615,9 @@ body.touch-ui .nav-back.hidden {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-border));
   background: color-mix(in srgb, var(--accent) 12%, rgba(0, 0, 0, 0.18));
 }
+.inbox-row.inbox-row-pinned {
+  border-color: color-mix(in srgb, var(--accent-2, #ffd166) 50%, var(--panel-border));
+}
 .inbox-check { margin-top: 0.2rem; }
 .inbox-row-body { min-width: 0; }
 .inbox-row-meta {
@@ -4315,7 +4634,12 @@ body.touch-ui .nav-back.hidden {
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
-.inbox-locked { cursor: help; }
+.inbox-locked {
+  cursor: help;
+  font-weight: 800;
+  color: var(--accent-2, #ffd166);
+  opacity: 1;
+}
 .inbox-title {
   font-weight: 700;
   margin: 0 0 0.15rem;
@@ -4352,6 +4676,11 @@ body.touch-ui .nav-back.hidden {
   gap: 0.35rem;
   margin-bottom: 0.75rem;
 }
+.friends-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
 .friends-row {
   display: flex;
   align-items: center;
@@ -4374,45 +4703,10 @@ body.touch-ui .nav-back.hidden {
 }
 
 @media (max-width: 760px) {
-  .inbox-layout {
+  body:not(.touch-ui) .inbox-layout {
     grid-template-columns: 1fr;
   }
-  .inbox-list { max-height: min(40vh, 22rem); }
-}
-
-/* touch landscape: inbox fit-shell */
-body.touch-ui.landscape #inbox.screen.active .panel {
-  max-height: calc(100dvh - 1.25rem);
-  overflow: auto;
-}
-body.touch-ui.landscape #inbox .inbox-layout {
-  grid-template-columns: minmax(0, 1.35fr) minmax(10rem, 0.85fr);
-  gap: 0.65rem;
-}
-body.touch-ui.landscape #inbox .inbox-list {
-  max-height: min(58dvh, 18rem);
-}
-body.touch-ui.landscape #inbox .panel-desc,
-body.touch-ui.landscape #inbox h2 {
-  margin-top: 0;
-}
-body.touch-ui.landscape #inbox .inbox-row {
-  padding: 0.4rem 0.5rem;
-}
-body.touch-ui.landscape #inbox .inbox-row-actions {
-  flex-direction: row;
-  flex-wrap: wrap;
-}
-@media (max-height: 420px) and (orientation: landscape) {
-  body.touch-ui #inbox .inbox-layout {
-    grid-template-columns: 1fr 1fr;
-  }
-  body.touch-ui #inbox .inbox-list {
-    max-height: min(48dvh, 14rem);
-  }
-  body.touch-ui #inbox .friends-search-row {
-    flex-wrap: wrap;
-  }
+  body:not(.touch-ui) .inbox-list { max-height: min(40vh, 22rem); }
 }
 
 /* modals */

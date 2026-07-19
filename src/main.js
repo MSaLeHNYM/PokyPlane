@@ -57,6 +57,7 @@ import {
   canPlayGame,
   isTouchMobile,
 } from './pwaGate.js';
+import { setupPushNotifications } from './pushNotify.js';
 import {
   applyTouchLayout,
   startTouchLayoutEditor,
@@ -1517,6 +1518,27 @@ function requireMpLogin(opts = {}) {
   return false;
 }
 
+/** True while already hosting, joining, connected, or in an MP match. */
+function isBusyInMultiplayer() {
+  if (gameMode === 'multiplayer' && (state === 'playing' || state === 'paused' || state === 'results')) {
+    return true;
+  }
+  const role = match?.role;
+  const status = match?.status;
+  if (!role || status === 'idle') return false;
+  if (role === 'host' && (status === 'hosting' || status === 'connected' || match.isConnected)) return true;
+  if (role === 'guest' && (status === 'connecting' || status === 'connected' || match.isConnected)) {
+    return true;
+  }
+  return false;
+}
+
+function canOpenNewHostSession() {
+  // Editing settings of your current lobby is allowed via mp-edit-settings.
+  if (match.role === 'host' && (match.status === 'hosting' || match.isConnected)) return false;
+  return !isBusyInMultiplayer();
+}
+
 async function flushPendingMpJoin() {
   if (!pendingMpRoom || !isLoggedIn()) return;
   const room = pendingMpRoom;
@@ -1584,8 +1606,15 @@ function syncMpLobbyUi() {
   const startBtn = document.getElementById('mp-start-btn');
   const kickBtn = document.getElementById('mp-kick-btn');
   const list = document.getElementById('mp-player-list');
+  const hostOpenBtn = document.querySelector('[data-action="mp-host-open"]');
   const isHost = match.role === 'host';
   const connected = match.isConnected || mpGuestConnected;
+
+  if (hostOpenBtn) {
+    const blockNewHost = !canOpenNewHostSession();
+    hostOpenBtn.disabled = blockNewHost;
+    hostOpenBtn.title = blockNewHost ? t('disconnectBeforeHost') : '';
+  }
 
   hostControls?.classList.toggle('hidden', !isHost || match.status === 'idle');
   guestWait?.classList.toggle('hidden', isHost || !connected || state === 'playing');
@@ -1966,6 +1995,11 @@ async function hostMatch() {
     applyHostSettingsFromModal();
     return;
   }
+  if (!canOpenNewHostSession()) {
+    hud.toast(t('disconnectBeforeHost'));
+    closeHostModal();
+    return;
+  }
   mpHub.reset();
   mpChatHistory.length = 0;
   renderChatLogs();
@@ -2085,6 +2119,10 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
     }
     if (action === 'mp-host-open') {
       if (!requireMpLogin()) return;
+      if (!canOpenNewHostSession()) {
+        hud.toast(t('disconnectBeforeHost'));
+        return;
+      }
       openHostModal(false);
     }
     if (action === 'mp-host-cancel') closeHostModal();
@@ -2371,6 +2409,7 @@ scene.background = new THREE.Color(0x143a5c);
 // Await auth before invite auto-join so logged-in tokens hydrate currentUser first.
 (async () => {
   await setupAuthUI();
+  setupPushNotifications();
   setupInboxUI();
   setInboxJoinLobbyHandler((roomId) => {
     showScreen('multiplayer');

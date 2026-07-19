@@ -90,6 +90,7 @@ export async function api(path, opts = {}) {
     const err = new Error(data.message || data.error || res.statusText);
     err.code = data.error;
     err.status = res.status;
+    if (data.retryAfterSec != null) err.retryAfterSec = data.retryAfterSec;
     throw err;
   }
   return data;
@@ -230,6 +231,13 @@ export async function sendLobbyInvite(friendId, { roomId, inviteUrl }) {
   return api(`/friends/${friendId}/lobby-invite`, {
     method: 'POST',
     body: { roomId, inviteUrl },
+  });
+}
+
+export async function consumeLobbyInvite({ id, roomId }) {
+  return api('/inbox/consume-lobby-invite', {
+    method: 'POST',
+    body: { id, roomId },
   });
 }
 

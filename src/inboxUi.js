@@ -14,6 +14,7 @@ import {
   requestFriend,
   removeFriend,
   sendLobbyInvite,
+  consumeLobbyInvite,
 } from './api.js';
 import { t } from './i18n.js';
 
@@ -22,8 +23,14 @@ let inboxFilter = 'all';
 const selectedIds = new Set();
 let pollTimer = null;
 let messagesCache = [];
-/** @type {null | ((roomId: string) => void)} */
+/** @type {null | ((roomId: string, meta?: { inboxId?: string }) => void)} */
 let joinLobbyHandler = null;
+
+const INVITE_COOLDOWN_MS = 20_000;
+let inviteCooldownUntil = 0;
+/** @type {Set<string>} friend ids already invited this hosting session */
+const invitedFriendIds = new Set();
+let inviteCooldownTimer = null;
 
 export function setInboxJoinLobbyHandler(fn) {
   joinLobbyHandler = typeof fn === 'function' ? fn : null;
@@ -86,7 +93,9 @@ function bindInboxChrome() {
     const on = !!e.target.checked;
     selectedIds.clear();
     if (on) {
-      for (const m of filteredMessages()) selectedIds.add(m.id);
+      for (const m of filteredMessages()) {
+        if (m.allowDelete !== false) selectedIds.add(m.id);
+      }
     }
     renderInboxList();
   });
@@ -165,11 +174,18 @@ async function refreshInbox() {
 }
 
 function filteredMessages() {
-  if (inboxFilter === 'unread') return messagesCache.filter((m) => !m.isRead);
-  if (inboxFilter === 'requests') return messagesCache.filter((m) => m.kind === 'friend_request');
-  if (inboxFilter === 'invites') return messagesCache.filter((m) => m.kind === 'lobby_invite');
-  if (inboxFilter === 'admin') return messagesCache.filter((m) => m.kind === 'admin');
-  return messagesCache;
+  let rows = messagesCache;
+  if (inboxFilter === 'unread') rows = messagesCache.filter((m) => !m.isRead);
+  else if (inboxFilter === 'requests') rows = messagesCache.filter((m) => m.kind === 'friend_request');
+  else if (inboxFilter === 'invites') rows = messagesCache.filter((m) => m.kind === 'lobby_invite');
+  else if (inboxFilter === 'admin') rows = messagesCache.filter((m) => m.kind === 'admin');
+  // Locked (pinned) first, then newest
+  return [...rows].sort((a, b) => {
+    const la = a.allowDelete === false ? 0 : 1;
+    const lb = b.allowDelete === false ? 0 : 1;
+    if (la !== lb) return la - lb;
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
 }
 
 function kindLabel(kind) {
@@ -205,17 +221,19 @@ function renderInboxList() {
         }
       } else if (m.kind === 'lobby_invite' && m.payload?.roomId) {
         actions = `<div class="inbox-row-actions">
-          <button type="button" class="menu-btn menu-btn-sm primary" data-join-room="${escapeAttr(m.payload.roomId)}" data-join-url="${escapeAttr(m.payload.inviteUrl || '')}">${t('joinLobby')}</button>
+          <button type="button" class="menu-btn menu-btn-sm primary" data-join-room="${escapeAttr(m.payload.roomId)}" data-join-url="${escapeAttr(m.payload.inviteUrl || '')}" data-inbox-id="${escapeAttr(m.id)}">${t('joinLobby')}</button>
         </div>`;
       }
-      return `<article class="inbox-row ${unread}" data-id="${m.id}">
+      return `<article class="inbox-row ${unread}${locked ? ' inbox-row-pinned' : ''}" data-id="${m.id}">
         <label class="inbox-check">
-          <input type="checkbox" data-inbox-check="${m.id}" ${checked} />
+          <input type="checkbox" data-inbox-check="${m.id}" ${checked}${
+            locked ? ` disabled title="${escapeAttr(t('inboxLocked'))}"` : ''
+          } />
         </label>
         <div class="inbox-row-body">
           <div class="inbox-row-meta">
             <span class="inbox-kind">${kindLabel(m.kind)}</span>
-            ${locked ? `<span class="inbox-locked" title="${t('inboxLocked')}">🔒</span>` : ''}
+            ${locked ? `<span class="inbox-locked" title="${escapeAttr(t('inboxLocked'))}">🔒 ${escapeHtml(t('inboxPinned'))}</span>` : ''}
             <time>${formatTime(m.createdAt)}</time>
           </div>
           <h3 class="inbox-title">${escapeHtml(m.title)}</h3>
@@ -254,19 +272,27 @@ async function onInboxListClick(e) {
   if (join) {
     const roomId = join.dataset.joinRoom;
     const url = join.dataset.joinUrl;
+    const inboxId = join.dataset.inboxId;
+    let room = roomId;
     if (url) {
       try {
         const u = new URL(url, window.location.origin);
         const r = u.searchParams.get('room');
-        if (r) {
-          joinLobbyHandler?.(r);
-          return;
-        }
+        if (r) room = r;
       } catch {
         /* fall through */
       }
     }
-    if (roomId) joinLobbyHandler?.(roomId);
+    if (!room) return;
+    join.disabled = true;
+    try {
+      await consumeLobbyInvite({ id: inboxId, roomId: room });
+    } catch {
+      /* still try to join */
+    }
+    joinLobbyHandler?.(room, { inboxId });
+    await refreshInbox();
+    updateInboxBadge();
   }
 }
 
@@ -370,8 +396,78 @@ let inviteRoomCtx = null;
 export function setInviteRoomContext(ctx) {
   const roomId = ctx?.roomId;
   const inviteUrl = ctx?.inviteUrl;
+  const prevRoom = inviteRoomCtx?.roomId;
   inviteRoomCtx = roomId && inviteUrl ? { roomId, inviteUrl } : null;
-  document.getElementById('mp-invite-friend')?.classList.toggle('hidden', !inviteRoomCtx);
+  if (!inviteRoomCtx || prevRoom !== inviteRoomCtx?.roomId) {
+    invitedFriendIds.clear();
+    inviteCooldownUntil = 0;
+    if (inviteCooldownTimer) {
+      clearInterval(inviteCooldownTimer);
+      inviteCooldownTimer = null;
+    }
+  }
+  const openBtn = document.getElementById('mp-invite-friend');
+  openBtn?.classList.toggle('hidden', !inviteRoomCtx);
+  if (openBtn && inviteRoomCtx) {
+    applyInviteButtonStates();
+  } else if (openBtn) {
+    openBtn.disabled = false;
+    openBtn.textContent = t('inviteFriend');
+  }
+}
+
+function inviteCooldownLeftSec() {
+  return Math.max(0, Math.ceil((inviteCooldownUntil - Date.now()) / 1000));
+}
+
+function startInviteCooldownUi() {
+  if (inviteCooldownTimer) clearInterval(inviteCooldownTimer);
+  inviteCooldownTimer = setInterval(() => {
+    const modal = document.getElementById('mp-invite-friend-modal');
+    if (!modal || modal.classList.contains('hidden')) {
+      if (inviteCooldownLeftSec() <= 0 && inviteCooldownTimer) {
+        clearInterval(inviteCooldownTimer);
+        inviteCooldownTimer = null;
+      }
+      return;
+    }
+    applyInviteButtonStates();
+    if (inviteCooldownLeftSec() <= 0) {
+      clearInterval(inviteCooldownTimer);
+      inviteCooldownTimer = null;
+    }
+  }, 250);
+}
+
+function applyInviteButtonStates() {
+  const list = document.getElementById('mp-invite-friend-list');
+  if (!list) return;
+  const left = inviteCooldownLeftSec();
+  list.querySelectorAll('[data-invite-friend]').forEach((btn) => {
+    const fid = btn.dataset.inviteFriend;
+    if (invitedFriendIds.has(fid)) {
+      btn.disabled = true;
+      btn.textContent = t('invited');
+      return;
+    }
+    if (left > 0) {
+      btn.disabled = true;
+      btn.textContent = t('inviteCooldown').replace('{n}', String(left));
+    } else {
+      btn.disabled = false;
+      btn.textContent = t('invite');
+    }
+  });
+  const openBtn = document.getElementById('mp-invite-friend');
+  if (openBtn && inviteRoomCtx) {
+    if (left > 0) {
+      openBtn.disabled = true;
+      openBtn.textContent = t('inviteCooldown').replace('{n}', String(left));
+    } else {
+      openBtn.disabled = false;
+      openBtn.textContent = t('inviteFriend');
+    }
+  }
 }
 
 async function openInviteFriendModal() {
@@ -396,6 +492,8 @@ async function openInviteFriendModal() {
         </div>`
       )
       .join('');
+    applyInviteButtonStates();
+    if (inviteCooldownLeftSec() > 0) startInviteCooldownUi();
   } catch (e) {
     list.innerHTML = `<p class="auth-error">${escapeHtml(e.message)}</p>`;
   }
@@ -404,12 +502,23 @@ async function openInviteFriendModal() {
 async function onInviteFriendClick(e) {
   const btn = e.target.closest('[data-invite-friend]');
   if (!btn || !inviteRoomCtx) return;
+  if (inviteCooldownLeftSec() > 0 || invitedFriendIds.has(btn.dataset.inviteFriend)) return;
+  btn.disabled = true;
   try {
     await sendLobbyInvite(btn.dataset.inviteFriend, inviteRoomCtx);
-    btn.textContent = t('invited');
-    btn.disabled = true;
+    invitedFriendIds.add(btn.dataset.inviteFriend);
+    inviteCooldownUntil = Date.now() + INVITE_COOLDOWN_MS;
+    applyInviteButtonStates();
+    startInviteCooldownUi();
   } catch (err) {
+    const retry = Number(err.retryAfterSec);
+    if (err.code === 'cooldown' || err.status === 429) {
+      inviteCooldownUntil = Date.now() + (retry > 0 ? retry * 1000 : INVITE_COOLDOWN_MS);
+      applyInviteButtonStates();
+      startInviteCooldownUi();
+    }
     alert(err.message || t('inviteFailed'));
+    applyInviteButtonStates();
   }
 }
 

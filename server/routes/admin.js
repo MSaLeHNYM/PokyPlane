@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { randomUUID } from 'crypto';
 import { query } from '../db.js';
 import { authMiddleware, adminMiddleware, getClientIp } from '../middleware/auth.js';
 import {
@@ -295,7 +296,7 @@ router.post('/inbox', async (req, res, next) => {
     const allow = allowDelete !== false && allowDelete !== 'false';
 
     if (broadcast) {
-      const sent = await broadcastAdminMessage({
+      const { sent, batchId } = await broadcastAdminMessage({
         title: t,
         body: body || '',
         allowDelete: allow,
@@ -304,9 +305,9 @@ router.post('/inbox', async (req, res, next) => {
       await logSecurityEvent('admin_inbox_broadcast', {
         userId: req.auth.userId,
         ip: getClientIp(req),
-        details: { title: t, sent, allowDelete: allow },
+        details: { title: t, sent, allowDelete: allow, batchId },
       });
-      return res.json({ ok: true, sent });
+      return res.json({ ok: true, sent, batchId });
     }
 
     if (!userId) {
@@ -319,6 +320,7 @@ router.post('/inbox', async (req, res, next) => {
     if (!target) {
       return res.status(404).json({ error: 'not_found', message: 'User not found.' });
     }
+    const batchId = randomUUID();
     const message = await createInboxMessage({
       userId,
       kind: 'admin',
@@ -327,15 +329,15 @@ router.post('/inbox', async (req, res, next) => {
       fromUserId: req.auth.userId,
       fromLabel: 'Admin',
       allowDelete: allow,
-      payload: { broadcast: false },
+      payload: { broadcast: false, batchId },
     });
     await logSecurityEvent('admin_inbox_send', {
       userId: req.auth.userId,
       targetUserId: userId,
       ip: getClientIp(req),
-      details: { title: t, allowDelete: allow },
+      details: { title: t, allowDelete: allow, batchId },
     });
-    res.json({ ok: true, sent: 1, message });
+    res.json({ ok: true, sent: 1, message, batchId });
   } catch (e) {
     next(e);
   }
@@ -352,12 +354,18 @@ router.get('/inbox/recent', async (req, res, next) => {
 
 router.post('/inbox/force-delete', async (req, res, next) => {
   try {
-    const { ids, title, body, createdAt, allowDelete } = req.body || {};
+    const { ids, batchId, title, body, createdAt, allowDelete } = req.body || {};
     let result;
     if (Array.isArray(ids) && ids.length) {
       result = await forceDeleteInboxByIds(ids);
     } else {
-      result = await forceDeleteAdminBatch({ title, body, createdAt, allowDelete });
+      result = await forceDeleteAdminBatch({
+        batchId,
+        title,
+        body,
+        createdAt,
+        allowDelete,
+      });
     }
     await logSecurityEvent('admin_inbox_force_delete', {
       userId: req.auth.userId,
@@ -365,6 +373,7 @@ router.post('/inbox/force-delete', async (req, res, next) => {
       details: {
         deleted: result.deleted,
         byIds: Array.isArray(ids) && ids.length > 0,
+        batchId: batchId || null,
         title: title ? String(title).slice(0, 120) : null,
       },
     });

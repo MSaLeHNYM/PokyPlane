@@ -27,9 +27,8 @@ let messagesCache = [];
 let joinLobbyHandler = null;
 
 const INVITE_COOLDOWN_MS = 20_000;
-let inviteCooldownUntil = 0;
-/** @type {Set<string>} friend ids already invited this hosting session */
-const invitedFriendIds = new Set();
+/** @type {Map<string, number>} friendId -> cooldownUntil ms */
+const inviteCooldownUntilByFriend = new Map();
 let inviteCooldownTimer = null;
 
 export function setInboxJoinLobbyHandler(fn) {
@@ -284,15 +283,22 @@ async function onInboxListClick(e) {
       }
     }
     if (!room) return;
+    room = String(room).trim().toLowerCase();
     join.disabled = true;
+    // Remove invite immediately so it doesn't linger if user returns to inbox.
     try {
-      await consumeLobbyInvite({ id: inboxId, roomId: room });
-    } catch {
-      /* still try to join */
+      await consumeLobbyInvite({ id: inboxId || undefined, roomId: room });
+      messagesCache = messagesCache.filter(
+        (m) =>
+          m.id !== inboxId &&
+          !(m.kind === 'lobby_invite' && String(m.payload?.roomId || '').toLowerCase() === room)
+      );
+      renderInboxList();
+      updateInboxBadge();
+    } catch (err) {
+      console.warn('[inbox] consume invite failed', err.message || err);
     }
     joinLobbyHandler?.(room, { inboxId });
-    await refreshInbox();
-    updateInboxBadge();
   }
 }
 
@@ -399,8 +405,7 @@ export function setInviteRoomContext(ctx) {
   const prevRoom = inviteRoomCtx?.roomId;
   inviteRoomCtx = roomId && inviteUrl ? { roomId, inviteUrl } : null;
   if (!inviteRoomCtx || prevRoom !== inviteRoomCtx?.roomId) {
-    invitedFriendIds.clear();
-    inviteCooldownUntil = 0;
+    inviteCooldownUntilByFriend.clear();
     if (inviteCooldownTimer) {
       clearInterval(inviteCooldownTimer);
       inviteCooldownTimer = null;
@@ -408,33 +413,44 @@ export function setInviteRoomContext(ctx) {
   }
   const openBtn = document.getElementById('mp-invite-friend');
   openBtn?.classList.toggle('hidden', !inviteRoomCtx);
-  if (openBtn && inviteRoomCtx) {
-    applyInviteButtonStates();
-  } else if (openBtn) {
+  if (openBtn) {
     openBtn.disabled = false;
     openBtn.textContent = t('inviteFriend');
   }
 }
 
-function inviteCooldownLeftSec() {
-  return Math.max(0, Math.ceil((inviteCooldownUntil - Date.now()) / 1000));
+function friendInviteCooldownLeftSec(friendId) {
+  const until = inviteCooldownUntilByFriend.get(friendId) || 0;
+  return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+}
+
+function anyInviteCooldownActive() {
+  const now = Date.now();
+  for (const until of inviteCooldownUntilByFriend.values()) {
+    if (until > now) return true;
+  }
+  return false;
+}
+
+function pruneInviteCooldowns() {
+  const now = Date.now();
+  for (const [fid, until] of inviteCooldownUntilByFriend) {
+    if (until <= now) inviteCooldownUntilByFriend.delete(fid);
+  }
 }
 
 function startInviteCooldownUi() {
   if (inviteCooldownTimer) clearInterval(inviteCooldownTimer);
   inviteCooldownTimer = setInterval(() => {
+    pruneInviteCooldowns();
     const modal = document.getElementById('mp-invite-friend-modal');
-    if (!modal || modal.classList.contains('hidden')) {
-      if (inviteCooldownLeftSec() <= 0 && inviteCooldownTimer) {
-        clearInterval(inviteCooldownTimer);
-        inviteCooldownTimer = null;
-      }
-      return;
+    if (modal && !modal.classList.contains('hidden')) {
+      applyInviteButtonStates();
     }
-    applyInviteButtonStates();
-    if (inviteCooldownLeftSec() <= 0) {
+    if (!anyInviteCooldownActive()) {
       clearInterval(inviteCooldownTimer);
       inviteCooldownTimer = null;
+      applyInviteButtonStates();
     }
   }, 250);
 }
@@ -442,14 +458,10 @@ function startInviteCooldownUi() {
 function applyInviteButtonStates() {
   const list = document.getElementById('mp-invite-friend-list');
   if (!list) return;
-  const left = inviteCooldownLeftSec();
+  pruneInviteCooldowns();
   list.querySelectorAll('[data-invite-friend]').forEach((btn) => {
     const fid = btn.dataset.inviteFriend;
-    if (invitedFriendIds.has(fid)) {
-      btn.disabled = true;
-      btn.textContent = t('invited');
-      return;
-    }
+    const left = friendInviteCooldownLeftSec(fid);
     if (left > 0) {
       btn.disabled = true;
       btn.textContent = t('inviteCooldown').replace('{n}', String(left));
@@ -458,16 +470,6 @@ function applyInviteButtonStates() {
       btn.textContent = t('invite');
     }
   });
-  const openBtn = document.getElementById('mp-invite-friend');
-  if (openBtn && inviteRoomCtx) {
-    if (left > 0) {
-      openBtn.disabled = true;
-      openBtn.textContent = t('inviteCooldown').replace('{n}', String(left));
-    } else {
-      openBtn.disabled = false;
-      openBtn.textContent = t('inviteFriend');
-    }
-  }
 }
 
 async function openInviteFriendModal() {
@@ -493,7 +495,7 @@ async function openInviteFriendModal() {
       )
       .join('');
     applyInviteButtonStates();
-    if (inviteCooldownLeftSec() > 0) startInviteCooldownUi();
+    if (anyInviteCooldownActive()) startInviteCooldownUi();
   } catch (e) {
     list.innerHTML = `<p class="auth-error">${escapeHtml(e.message)}</p>`;
   }
@@ -502,23 +504,28 @@ async function openInviteFriendModal() {
 async function onInviteFriendClick(e) {
   const btn = e.target.closest('[data-invite-friend]');
   if (!btn || !inviteRoomCtx) return;
-  if (inviteCooldownLeftSec() > 0 || invitedFriendIds.has(btn.dataset.inviteFriend)) return;
+  const friendId = btn.dataset.inviteFriend;
+  if (friendInviteCooldownLeftSec(friendId) > 0) return;
   btn.disabled = true;
   try {
-    await sendLobbyInvite(btn.dataset.inviteFriend, inviteRoomCtx);
-    invitedFriendIds.add(btn.dataset.inviteFriend);
-    inviteCooldownUntil = Date.now() + INVITE_COOLDOWN_MS;
+    await sendLobbyInvite(friendId, inviteRoomCtx);
+    inviteCooldownUntilByFriend.set(friendId, Date.now() + INVITE_COOLDOWN_MS);
     applyInviteButtonStates();
     startInviteCooldownUi();
   } catch (err) {
     const retry = Number(err.retryAfterSec);
     if (err.code === 'cooldown' || err.status === 429) {
-      inviteCooldownUntil = Date.now() + (retry > 0 ? retry * 1000 : INVITE_COOLDOWN_MS);
+      inviteCooldownUntilByFriend.set(
+        friendId,
+        Date.now() + (retry > 0 ? retry * 1000 : INVITE_COOLDOWN_MS)
+      );
       applyInviteButtonStates();
       startInviteCooldownUi();
+    } else {
+      btn.disabled = false;
+      btn.textContent = t('invite');
     }
     alert(err.message || t('inviteFailed'));
-    applyInviteButtonStates();
   }
 }
 

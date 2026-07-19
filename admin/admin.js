@@ -284,6 +284,7 @@ async function forceDeleteRecentAt(index) {
   const data = await api('/admin/inbox/force-delete', {
     method: 'POST',
     body: {
+      batchId: row.batchId || undefined,
       title: row.title,
       body: row.body || '',
       createdAt: row.createdAt,

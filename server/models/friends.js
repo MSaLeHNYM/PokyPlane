@@ -301,7 +301,9 @@ export async function sendLobbyInvite(fromUserId, friendId, { roomId, inviteUrl 
     err.status = 403;
     throw err;
   }
-  const room = String(roomId || '').trim();
+  const room = String(roomId || '')
+    .trim()
+    .toLowerCase();
   const url = String(inviteUrl || '').trim();
   if (!room || !url) {
     const err = new Error('roomId and inviteUrl required.');

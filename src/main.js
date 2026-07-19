@@ -26,7 +26,7 @@ import { MpHub } from './mpHub.js';
 import { WeaponSystem, WEAPON_ORDER, WEAPON_DEFS, DEFAULT_WEAPON_FLAGS, isExplosiveWeapon } from './weapons.js';
 import { FuelPickups } from './fuel.js';
 import { setupAuthUI, isLoggedIn, getUser, openAuthModal } from './authUi.js';
-import { onAuthChanged, fetchAnnouncement, submitScore, updateProfile } from './api.js';
+import { onAuthChanged, fetchAnnouncement, submitScore, updateProfile, consumeLobbyInvite } from './api.js';
 import {
   setupInboxUI,
   openInboxScreen,
@@ -2055,6 +2055,10 @@ async function joinMatch(code) {
     pendingMpRoom = null;
     document.getElementById('mp-status').textContent = t('waitingHostStart');
     syncMpLobbyUi();
+    // Clear any lobby invite(s) for this room after a successful join.
+    if (isLoggedIn()) {
+      consumeLobbyInvite({ roomId: room }).catch(() => {});
+    }
   } catch (e) {
     console.error(e);
     const msg =

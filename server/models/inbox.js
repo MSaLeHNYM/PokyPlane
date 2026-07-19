@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { randomUUID } from 'crypto';
 
 export function formatInboxMessage(row) {
   if (!row) return null;
@@ -117,13 +118,18 @@ export async function consumeLobbyInvite(userId, messageId) {
 
 /** Remove all invites for a room for this user (e.g. after successful join). */
 export async function consumeLobbyInvitesForRoom(userId, roomId) {
-  const room = String(roomId || '').trim();
+  const room = String(roomId || '')
+    .trim()
+    .toLowerCase();
   if (!room) return { deleted: 0 };
   const { rowCount } = await query(
     `DELETE FROM inbox_messages
      WHERE user_id = $1
        AND kind = 'lobby_invite'
-       AND (payload->>'roomId') = $2`,
+       AND (
+         LOWER(TRIM(COALESCE(payload->>'roomId', ''))) = $2
+         OR LOWER(COALESCE(payload->>'inviteUrl', '')) LIKE '%room=' || $2 || '%'
+       )`,
     [userId, room]
   );
   return { deleted: rowCount || 0 };
@@ -142,23 +148,42 @@ export async function forceDeleteInboxByIds(ids) {
 
 /**
  * Admin: remove a whole admin send batch (including locked).
- * Matches title + body + created_at + allow_delete like listRecentAdminSends groups.
+ * Prefer batchId (stable). Fallback matches title/body/allow_delete near createdAt
+ * so legacy rows without batchId still delete despite timestamp precision drift.
  */
-export async function forceDeleteAdminBatch({ title, body = '', createdAt, allowDelete }) {
+export async function forceDeleteAdminBatch({
+  batchId,
+  title,
+  body = '',
+  createdAt,
+  allowDelete,
+}) {
+  if (batchId) {
+    const { rowCount } = await query(
+      `DELETE FROM inbox_messages
+       WHERE kind = 'admin'
+         AND (payload->>'batchId') = $1`,
+      [String(batchId)]
+    );
+    return { deleted: rowCount || 0 };
+  }
+
   if (!title || !createdAt) {
-    const err = new Error('title and createdAt required.');
+    const err = new Error('batchId or (title and createdAt) required.');
     err.status = 400;
     err.code = 'validation';
     throw err;
   }
   const allow = allowDelete !== false && allowDelete !== 'false';
+  // Broadcasts insert one row per user over time; match within a 2-minute window.
   const { rowCount } = await query(
     `DELETE FROM inbox_messages
      WHERE kind = 'admin'
        AND title = $1
        AND COALESCE(body, '') = $2
        AND allow_delete = $3
-       AND created_at = $4::timestamptz`,
+       AND created_at >= ($4::timestamptz - interval '2 minutes')
+       AND created_at <= ($4::timestamptz + interval '2 minutes')`,
     [String(title), String(body || ''), allow, createdAt]
   );
   return { deleted: rowCount || 0 };
@@ -181,6 +206,7 @@ export async function broadcastAdminMessage({ title, body, allowDelete, fromUser
   const { rows: users } = await query(
     `SELECT id FROM users WHERE is_banned = FALSE`
   );
+  const batchId = randomUUID();
   let sent = 0;
   for (const u of users) {
     await createInboxMessage({
@@ -191,27 +217,46 @@ export async function broadcastAdminMessage({ title, body, allowDelete, fromUser
       fromUserId,
       fromLabel: 'Admin',
       allowDelete: allowDelete !== false,
-      payload: { broadcast: true },
+      payload: { broadcast: true, batchId },
     });
     sent += 1;
   }
-  return sent;
+  return { sent, batchId };
 }
 
 export async function listRecentAdminSends(limit = 30) {
   const lim = Math.min(100, Math.max(1, Number(limit) || 30));
+  // Group by batchId when present; otherwise by title/body/lock + truncated second
+  // so broadcast rows with slightly different created_at still show as one send.
   const { rows } = await query(
-    `SELECT kind, title, body, allow_delete, from_label, created_at,
-            COUNT(*)::int AS recipients
+    `SELECT
+       MAX(payload->>'batchId') AS batch_id,
+       title,
+       body,
+       allow_delete,
+       MAX(from_label) AS from_label,
+       MIN(created_at) AS created_at,
+       COUNT(*)::int AS recipients
      FROM inbox_messages
      WHERE kind = 'admin'
-     GROUP BY kind, title, body, allow_delete, from_label, created_at
-     ORDER BY created_at DESC
+     GROUP BY
+       COALESCE(
+         NULLIF(payload->>'batchId', ''),
+         md5(
+           title || E'\\x1f' || COALESCE(body, '') || E'\\x1f' || allow_delete::text || E'\\x1f' ||
+           date_trunc('second', created_at)::text
+         )
+       ),
+       title,
+       body,
+       allow_delete
+     ORDER BY MIN(created_at) DESC
      LIMIT $1`,
     [lim]
   );
   return rows.map((r) => ({
-    kind: r.kind,
+    kind: 'admin',
+    batchId: r.batch_id || null,
     title: r.title,
     body: r.body,
     allowDelete: r.allow_delete !== false,

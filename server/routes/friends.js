@@ -14,17 +14,21 @@ import {
 const router = Router();
 router.use(authMiddleware);
 
-/** Host → friend lobby invite cooldown (ms). */
+/** Host → friend lobby invite cooldown (ms), per friend. */
 const LOBBY_INVITE_COOLDOWN_MS = 20_000;
-/** @type {Map<string, number>} */
+/** @type {Map<string, number>} key = `${fromUserId}:${friendId}` */
 const lobbyInviteCooldownUntil = new Map();
 
-function assertLobbyInviteCooldown(userId) {
-  const until = lobbyInviteCooldownUntil.get(userId) || 0;
+function lobbyInviteCooldownKey(userId, friendId) {
+  return `${userId}:${friendId}`;
+}
+
+function assertLobbyInviteCooldown(userId, friendId) {
+  const until = lobbyInviteCooldownUntil.get(lobbyInviteCooldownKey(userId, friendId)) || 0;
   const now = Date.now();
   if (until > now) {
     const err = new Error(
-      `Please wait ${Math.ceil((until - now) / 1000)}s before sending another invite.`
+      `Please wait ${Math.ceil((until - now) / 1000)}s before inviting this friend again.`
     );
     err.code = 'cooldown';
     err.status = 429;
@@ -33,8 +37,11 @@ function assertLobbyInviteCooldown(userId) {
   }
 }
 
-function markLobbyInviteCooldown(userId) {
-  lobbyInviteCooldownUntil.set(userId, Date.now() + LOBBY_INVITE_COOLDOWN_MS);
+function markLobbyInviteCooldown(userId, friendId) {
+  lobbyInviteCooldownUntil.set(
+    lobbyInviteCooldownKey(userId, friendId),
+    Date.now() + LOBBY_INVITE_COOLDOWN_MS
+  );
 }
 
 router.get('/', async (req, res, next) => {
@@ -105,13 +112,13 @@ router.delete('/:friendId', async (req, res, next) => {
 
 router.post('/:friendId/lobby-invite', async (req, res, next) => {
   try {
-    assertLobbyInviteCooldown(req.auth.userId);
+    assertLobbyInviteCooldown(req.auth.userId, req.params.friendId);
     const { roomId, inviteUrl } = req.body || {};
     const message = await sendLobbyInvite(req.auth.userId, req.params.friendId, {
       roomId,
       inviteUrl,
     });
-    markLobbyInviteCooldown(req.auth.userId);
+    markLobbyInviteCooldown(req.auth.userId, req.params.friendId);
     res.status(201).json({
       message,
       cooldownSec: LOBBY_INVITE_COOLDOWN_MS / 1000,

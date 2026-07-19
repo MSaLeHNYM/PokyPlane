@@ -6,6 +6,9 @@
     "version": "20"
   },
   "build": {
-    "commands": ["npm install", "npm run build"]
+    "location": "iran",
+    "commands": [
+      "npm run build"
+    ]
   }
 }

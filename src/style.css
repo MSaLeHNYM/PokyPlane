@@ -81,7 +81,7 @@ body,
   padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
 }
 
-/* Main menu — scrollable on short / phone screens */
+/* Main menu — no page scroll on touch; landscape grid fits the viewport */
 #menu.screen {
   overflow-x: hidden;
   overflow-y: auto;
@@ -94,10 +94,23 @@ body,
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
+body.touch-ui #menu.screen {
+  overflow: hidden;
+  touch-action: none;
+  justify-content: center;
+  height: 100%;
+  max-height: 100dvh;
+}
+
 #menu.screen > .menu-content {
   margin: 0 auto;
   flex-shrink: 0;
   min-height: 0;
+}
+
+/* Desktop: wrapper is transparent so map/seed stay stacked children of .menu-content */
+.menu-setup-row {
+  display: contents;
 }
 
 /* Center panel content vertically when shorter than viewport */
@@ -111,8 +124,10 @@ body,
 .menu-bg {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+  /* Opaque sky; JS punches a hole over `.menu-plane-stage` for the 3D preview */
   background:
-    radial-gradient(ellipse 80% 60% at 50% 30%, rgba(94, 184, 232, 0.35), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 50% 30%, rgba(94, 184, 232, 0.28), transparent 62%),
     linear-gradient(180deg, #1a4a7a 0%, #0e2a45 45%, #163820 100%);
   animation: skyShift 18s ease-in-out infinite alternate;
 }
@@ -133,13 +148,13 @@ body,
   animation: fadeUp 0.7s ease-out;
 }
 
-/* Extra top room when announcement banner is visible */
+/* Extra top room when announcement banner is visible (portrait / stacked menu) */
 #menu:has(#announce-banner:not(.hidden)) .menu-content {
-  padding-top: 5.5rem;
+  padding-top: clamp(5.5rem, 14vh, 7rem);
 }
 
 #menu:has(#announce-banner:not(.hidden)) .menu-topbar {
-  top: 3.25rem;
+  top: 0;
 }
 
 /* Logged-in layout — tighter vertical rhythm */
@@ -181,6 +196,30 @@ body,
   gap: 0.35rem;
   margin: 0 auto 0.5rem;
   max-width: 100%;
+}
+
+/* Transparent window — canvas paints the hangar plane here via scissor */
+.menu-plane-stage {
+  position: relative;
+  width: min(100%, 320px);
+  height: clamp(140px, 28vh, 220px);
+  margin: 0.15rem auto 0.1rem;
+  border-radius: 18px;
+  pointer-events: none;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 12px 28px rgba(0, 0, 0, 0.28);
+  background: transparent;
+}
+
+.menu-plane-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 -24px 36px rgba(6, 20, 36, 0.28);
 }
 
 .logo {
@@ -239,6 +278,7 @@ body,
   font-weight: 600;
   letter-spacing: 0.04em;
   font-size: 0.95rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
 }
 
 .plane-picker {
@@ -286,6 +326,7 @@ body,
   margin: 0 0 0.55rem;
   min-height: 1.1em;
   padding: 0 0.5rem;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
 
 .menu-nav {
@@ -1071,6 +1112,139 @@ body.touch-ui .hud-panel {
   filter: brightness(1.15);
 }
 
+/* Custom absolute layout for each control */
+#touch.touch-custom .touch-btns,
+#touch.touch-custom .touch-btn-row {
+  display: contents;
+}
+
+#touch.touch-custom .touch-ctrl {
+  position: absolute;
+  margin: 0;
+  pointer-events: auto;
+}
+
+#touch.touch-custom .stick {
+  bottom: auto;
+  left: auto;
+}
+
+#touch.touch-custom .touch-pause {
+  top: auto;
+  right: auto;
+}
+
+/* Layout editor chrome */
+.touch-layout-editor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  pointer-events: none;
+  padding: 0.5rem;
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+.touch-layout-editor.hidden {
+  display: none !important;
+}
+
+.tle-bar {
+  pointer-events: auto;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0.55rem 0.75rem;
+  border-radius: 14px;
+  background: rgba(8, 22, 38, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+  color: #e8f1fa;
+}
+
+.tle-hint {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  opacity: 0.9;
+  text-align: center;
+}
+
+.tle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.45rem;
+  font-size: 0.8rem;
+}
+
+.tle-size-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.tle-size-label input[type='range'] {
+  width: min(180px, 40vw);
+}
+
+.tle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: center;
+}
+
+.tle-actions .menu-btn {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+  min-width: 0;
+}
+
+body.touch-layout-editing #hud,
+body.touch-layout-editing #fps-counter {
+  visibility: hidden;
+}
+
+body.touch-layout-editing #touch {
+  z-index: 35;
+}
+
+#touch.touch-editing .touch-ctrl {
+  outline: 2px dashed rgba(120, 200, 255, 0.55);
+  outline-offset: 3px;
+}
+
+#touch.touch-editing .touch-ctrl.touch-selected {
+  outline-color: #ffd36a;
+  outline-style: solid;
+  box-shadow: 0 0 0 3px rgba(255, 211, 106, 0.25);
+}
+
+.touch-layout-settings {
+  margin: 0.5rem 0 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.settings-autodetect {
+  width: 100%;
+  margin: 0.35rem 0 0.15rem;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.75rem;
+}
+
+body.touch-ui .touch-only-ui.hidden {
+  display: none !important;
+}
+
+body:not(.touch-ui) .touch-only-ui {
+  display: none !important;
+}
+
 @media (max-width: 700px) {
   .menu-content {
     padding: 2.5rem 0.85rem 1.25rem;
@@ -1171,8 +1345,8 @@ body.touch-ui .hud-panel {
 
 #fps-counter {
   position: absolute;
-  top: 0.75rem;
-  inset-inline-start: 0.75rem;
+  top: calc(0.65rem + env(safe-area-inset-top, 0px));
+  inset-inline-start: calc(0.75rem + env(safe-area-inset-left, 0px));
   z-index: 25;
   font-family: var(--font-ui);
   font-weight: 800;
@@ -1184,52 +1358,87 @@ body.touch-ui .hud-panel {
   pointer-events: none;
 }
 
+/* Desktop: keep FPS off the bottom-right minimap */
+body:not(.touch-ui) #fps-counter {
+  top: calc(0.65rem + env(safe-area-inset-top, 0px));
+  bottom: auto;
+  inset-inline-start: calc(0.75rem + env(safe-area-inset-left, 0px));
+  inset-inline-end: auto;
+}
+
+/* Touch (playing + menus with back): top-center — clear of minimap, pause, and nav-back */
+body.touch-ui #fps-counter,
+body.touch-ui:has(#nav-back:not(.hidden)) #fps-counter {
+  inset-inline-start: 50%;
+  inset-inline-end: auto;
+  transform: translateX(-50%);
+  top: calc(0.35rem + env(safe-area-inset-top, 0px));
+}
+
 .announce-banner {
   position: absolute;
-  top: 1rem;
-  left: 1rem;
-  right: 1rem;
+  top: calc(3.15rem + env(safe-area-inset-top, 0px));
+  left: calc(0.75rem + env(safe-area-inset-left, 0px));
+  right: calc(0.75rem + env(safe-area-inset-right, 0px));
   z-index: 25;
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  max-width: 720px;
+  align-items: flex-start;
+  gap: 0.55rem;
+  max-width: min(640px, calc(100% - 1.5rem));
   margin-inline: auto;
-  padding: 0.75rem 1rem;
+  padding: 0.55rem 0.7rem;
   background: linear-gradient(90deg, rgba(255, 107, 74, 0.92), rgba(255, 209, 102, 0.88));
   color: #1a1520;
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
   animation: bannerIn 0.55s ease-out;
+  box-sizing: border-box;
+  max-height: 4.5rem;
+  overflow: hidden;
 }
 
 @keyframes bannerIn {
-  from { opacity: 0; transform: translateY(-16px); }
+  from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.announce-icon { font-size: 1.25rem; flex-shrink: 0; }
+.announce-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  line-height: 1.4;
+  margin-top: 0.05rem;
+}
 
 #announce-text {
   flex: 1;
+  min-width: 0;
   font-weight: 800;
-  font-size: 0.92rem;
-  line-height: 1.35;
+  font-size: 0.88rem;
+  line-height: 1.3;
   text-align: start;
+  margin: 0;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  word-break: break-word;
 }
 
 .announce-close {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   border: none;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.15);
   color: #1a1520;
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   cursor: pointer;
   line-height: 1;
   touch-action: manipulation;
+  align-self: center;
 }
 
 .announce-close:active {
@@ -1553,6 +1762,44 @@ body.touch-ui .hud-panel {
   border: 1px solid var(--panel-border);
 }
 
+.mp-host-top {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.mp-invite-row {
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
+.mp-invite-row input {
+  min-width: 0;
+}
+
+.mp-side-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.mp-join-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.mp-join-field {
+  min-width: 0;
+}
+
+.mp-join-actions {
+  flex-wrap: wrap;
+}
+
 .mp-status {
   font-weight: 800;
   color: var(--accent-2);
@@ -1631,6 +1878,30 @@ body.touch-ui .hud-panel {
   font-size: 0.75rem;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.mp-device {
+  display: inline-block;
+  margin-inline-start: 0.35rem;
+  padding: 0.08rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.mp-device.pc {
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.35);
+  border: 1px solid rgba(96, 165, 250, 0.45);
+}
+
+.mp-device.mobile {
+  color: #bbf7d0;
+  background: rgba(22, 163, 74, 0.35);
+  border: 1px solid rgba(74, 222, 128, 0.45);
 }
 
 .mp-host-controls {
@@ -1741,9 +2012,26 @@ body.touch-ui .hud-panel {
   cursor: pointer;
 }
 
+/* Touch: keep chat clear of the left joystick */
 body.touch-ui .hud-chat {
-  bottom: calc(5.2rem + env(safe-area-inset-bottom, 0px));
-  width: min(240px, 48vw);
+  left: calc(0.45rem + env(safe-area-inset-left, 0px));
+  right: auto;
+  bottom: auto;
+  top: calc(3.35rem + env(safe-area-inset-top, 0px));
+  width: min(210px, 36vw);
+  max-width: 42vw;
+}
+
+body.touch-ui .hud-chat-log {
+  max-height: 3.1rem;
+  font-size: 0.72rem;
+  padding: 0.3rem 0.4rem;
+}
+
+body.touch-ui .hud-chat-row input,
+body.touch-ui .hud-chat-send {
+  padding: 0.28rem 0.4rem;
+  font-size: 0.72rem;
 }
 
 html.lang-fa .logo { letter-spacing: 0; }
@@ -1935,6 +2223,22 @@ html[dir="rtl"] body.touch-ui #minimap {
 
 .modal-wide { width: min(560px, 96vw); }
 
+.modal-scroll {
+  min-width: 0;
+}
+
+.modal-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.modal-form-fit {
+  display: block;
+}
+
 .modal-close {
   position: absolute;
   top: 0.35rem;
@@ -2064,48 +2368,734 @@ html.lang-fa .modal-panel select {
   }
 }
 
-/* Landscape phones — compact HUD, larger stick, smaller buttons */
-@media (orientation: landscape) and (max-height: 520px),
-  (orientation: landscape) and (max-width: 960px) {
-  /* —— Main menu: side-by-side so it fits short landscape viewports —— */
+/* —— Desktop PC landscape: fixed split menu (fits 1920×1080, no scroll) —— */
+@media (orientation: landscape) and (min-width: 900px) {
+  body:not(.touch-ui) #menu.screen {
+    justify-content: center;
+    align-items: stretch;
+    overflow: hidden;
+    height: 100%;
+    max-height: 100dvh;
+    padding: 0.5rem 1.25rem;
+  }
+
+  body:not(.touch-ui) #menu .menu-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
+    grid-template-rows: auto auto auto auto auto auto;
+    align-content: center;
+    align-items: center;
+    justify-content: space-between;
+    column-gap: clamp(2.5rem, 6vw, 5rem);
+    row-gap: clamp(0.35rem, 1vh, 0.7rem);
+    width: min(100%, 1480px);
+    max-height: 100dvh;
+    height: 100%;
+    overflow: hidden;
+    padding:
+      clamp(2.5rem, 5vh, 3.5rem)
+      clamp(2rem, 5vw, 4rem)
+      clamp(0.5rem, 1.5vh, 1rem)
+      clamp(1rem, 3vw, 2rem);
+    text-align: start;
+    margin: auto;
+    box-sizing: border-box;
+  }
+
+  /* Announce / account must not push the split grid */
+  body:not(.touch-ui) #menu:has(#announce-banner:not(.hidden)) .menu-content {
+    padding-top: clamp(2.5rem, 5vh, 3.5rem);
+  }
+
+  body:not(.touch-ui) #menu:has(#announce-banner:not(.hidden)) .menu-topbar {
+    top: 0;
+  }
+
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .menu-content {
+    padding-top: clamp(2.5rem, 5vh, 3.5rem);
+    padding-bottom: clamp(0.5rem, 1.5vh, 1rem);
+  }
+
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .game-logo {
+    width: clamp(260px, 24vw, 380px);
+  }
+
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .plane-picker {
+    margin-top: 0;
+  }
+
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .menu-nav {
+    gap: clamp(0.4rem, 1.2vh, 0.85rem);
+  }
+
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .menu-btn {
+    padding: clamp(0.55rem, 1.5vh, 0.75rem) 0.65rem;
+    font-size: clamp(0.9rem, 1.7vh, 1.05rem);
+  }
+
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .menu-account-row {
+    margin-top: 0;
+  }
+
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .hint {
+    margin-top: 0;
+  }
+
+  body:not(.touch-ui) #menu .menu-brand {
+    grid-column: 1;
+    grid-row: 1 / 7;
+    align-self: center;
+    justify-self: center;
+    margin: 0;
+    text-align: center;
+    width: min(100%, 720px);
+    max-width: 100%;
+    height: auto;
+    min-height: 0;
+    justify-content: center;
+  }
+
+  body:not(.touch-ui) #menu .menu-plane-stage {
+    width: min(100%, 640px);
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: min(48vh, 380px);
+    max-width: min(100%, calc(min(48vh, 380px) * 16 / 9));
+    flex: 0 0 auto;
+    margin-top: 0.65rem;
+  }
+
+  body:not(.touch-ui) #menu .game-logo {
+    width: clamp(260px, 24vw, 380px);
+    max-width: 100%;
+    height: auto;
+    animation: none;
+  }
+
+  body:not(.touch-ui) #menu .tagline {
+    font-size: clamp(0.9rem, 1.6vh, 1.1rem);
+    margin-top: 0.4rem;
+  }
+
+  body:not(.touch-ui) #menu .plane-picker {
+    grid-column: 2;
+    grid-row: 1;
+    margin: 0;
+    max-width: none;
+    justify-content: center;
+    justify-self: end;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    width: 100%;
+  }
+
+  body:not(.touch-ui) #menu .plane-btn {
+    width: 48px;
+    height: 48px;
+    font-size: 1.3rem;
+    flex: 0 0 auto;
+  }
+
+  body:not(.touch-ui) #menu .plane-tagline {
+    grid-column: 2;
+    grid-row: 2;
+    margin: 0;
+    font-size: clamp(0.82rem, 1.4vh, 0.95rem);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body:not(.touch-ui) #menu .menu-setup-row {
+    grid-column: 2;
+    grid-row: 3;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.4rem;
+    margin: 0;
+    min-width: 0;
+  }
+
+  body:not(.touch-ui) #menu .map-picker {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.55rem;
+    margin: 0;
+    font-size: clamp(0.82rem, 1.4vh, 0.92rem);
+  }
+
+  body:not(.touch-ui) #menu .map-picker select {
+    margin-top: 0;
+    min-width: 0;
+    flex: 1;
+    max-width: none;
+    padding: 0.4rem 0.55rem;
+    font-size: inherit;
+  }
+
+  body:not(.touch-ui) #menu .world-seed-line {
+    margin: 0;
+    text-align: center;
+    font-size: clamp(0.75rem, 1.3vh, 0.85rem);
+    opacity: 0.88;
+    white-space: nowrap;
+  }
+
+  /* Mode buttons: vertical stack on the right */
+  body:not(.touch-ui) #menu .menu-nav {
+    grid-column: 2;
+    grid-row: 4;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(0.35rem, 1vh, 0.55rem);
+    margin: 0;
+    width: 100%;
+    align-content: center;
+    align-self: center;
+    justify-content: center;
+  }
+
+  body:not(.touch-ui) #menu .menu-nav .menu-btn {
+    width: 100%;
+    padding: clamp(0.55rem, 1.5vh, 0.78rem) 0.85rem;
+    font-size: clamp(0.92rem, 1.7vh, 1.05rem);
+  }
+
+  body:not(.touch-ui) #menu .menu-account-row,
+  body:not(.touch-ui) #menu .menu-btn-login {
+    grid-column: 2;
+    grid-row: 5;
+    margin: 0;
+  }
+
+  body:not(.touch-ui) #menu .menu-account-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: center;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  body:not(.touch-ui) #menu .menu-account-row .menu-btn {
+    flex: 1 1 4.4rem;
+    min-width: 4.2rem;
+    max-width: 100%;
+    width: auto;
+    padding: 0.4rem 0.4rem !important;
+    font-size: clamp(0.7rem, 1.2vh, 0.8rem) !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body:not(.touch-ui) #menu .menu-btn-login {
+    width: 100%;
+    padding: 0.42rem 0.75rem;
+    font-size: clamp(0.8rem, 1.35vh, 0.9rem);
+  }
+
+  body:not(.touch-ui) #menu .hint {
+    grid-column: 2;
+    grid-row: 6;
+    margin: 0;
+    font-size: clamp(0.72rem, 1.2vh, 0.85rem);
+    text-align: center;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.85;
+  }
+
+  /* Compact announce overlay on desktop landscape — never push the split grid */
+  body:not(.touch-ui) #menu:has(#announce-banner:not(.hidden)) .menu-content {
+    padding-top: clamp(2.5rem, 5vh, 3.5rem);
+  }
+
+  body:not(.touch-ui) #menu:has(#announce-banner:not(.hidden)) .menu-topbar {
+    top: 0;
+  }
+
+  body:not(.touch-ui) #menu .announce-banner {
+    top: calc(0.55rem + env(safe-area-inset-top, 0px));
+    left: max(5.75rem, calc(50% - 260px));
+    right: max(5.75rem, calc(50% - 260px));
+    width: auto;
+    max-width: 520px;
+    margin-inline: auto;
+    padding: 0.4rem 0.7rem;
+    gap: 0.45rem;
+    max-height: 3.5rem;
+    z-index: 27;
+  }
+
+  body:not(.touch-ui) #menu #announce-text {
+    font-size: 0.82rem;
+    line-height: 1.25;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+  }
+
+  body:not(.touch-ui) #menu .announce-close {
+    width: 32px;
+    height: 32px;
+    font-size: 1rem;
+  }
+
+  body:not(.touch-ui) #menu .menu-topbar {
+    padding: 0.75rem 1.25rem;
+  }
+}
+
+/* Shorter desktop landscape (e.g. 1366×768) */
+@media (orientation: landscape) and (min-width: 900px) and (max-height: 800px) {
+  body:not(.touch-ui) #menu .menu-content {
+    row-gap: 0.3rem;
+    column-gap: 1rem;
+    padding-top: 2.2rem;
+    padding-bottom: 0.4rem;
+  }
+
+  body:not(.touch-ui) #menu .game-logo,
+  body:not(.touch-ui) #menu:has(#menu-account-row:not(.hidden)) .game-logo {
+    width: clamp(200px, 20vw, 280px);
+  }
+
+  body:not(.touch-ui) #menu .tagline {
+    font-size: 0.82rem;
+  }
+
+  body:not(.touch-ui) #menu .plane-btn {
+    width: 44px;
+    height: 44px;
+    font-size: 1.15rem;
+  }
+
+  body:not(.touch-ui) #menu .menu-plane-stage {
+    max-height: min(40vh, 280px);
+    max-width: min(100%, calc(min(40vh, 280px) * 16 / 9));
+  }
+
+  body:not(.touch-ui) #menu .menu-nav .menu-btn {
+    padding: 0.42rem 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  body:not(.touch-ui) #menu .hint {
+    font-size: 0.72rem;
+  }
+}
+
+/* —— Desktop PC landscape: secondary screens (1920×1080, no outer scroll) —— */
+@media (orientation: landscape) and (min-width: 900px) {
+  body:not(.touch-ui) #options.screen,
+  body:not(.touch-ui) #multiplayer.screen,
+  body:not(.touch-ui) #pause.screen,
+  body:not(.touch-ui) #results.screen {
+    align-items: stretch;
+    justify-content: center;
+    overflow: hidden;
+    height: 100%;
+    max-height: 100dvh;
+    padding: 0.85rem 1.25rem;
+  }
+
+  /* Settings */
+  body:not(.touch-ui) #options .settings-shell {
+    width: min(100%, 1020px);
+    max-height: calc(100dvh - 1.7rem);
+    margin: 0 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  body:not(.touch-ui) #options .settings-header {
+    flex-shrink: 0;
+    padding: 0.75rem 1.1rem;
+  }
+
+  body:not(.touch-ui) #options .settings-header h2 {
+    font-size: clamp(1.25rem, 2.2vh, 1.6rem);
+    margin: 0;
+  }
+
+  body:not(.touch-ui) #options .settings-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  body:not(.touch-ui) #options .settings-nav {
+    flex-shrink: 0;
+  }
+
+  body:not(.touch-ui) #options .settings-panels {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.85rem 1.15rem;
+  }
+
+  body:not(.touch-ui) #options .settings-pane {
+    gap: 0.55rem;
+  }
+
+  body:not(.touch-ui) #options .settings-footer {
+    flex-shrink: 0;
+    padding: 0.7rem 1.1rem;
+  }
+
+  body:not(.touch-ui) #options .settings-autodetect {
+    margin: 0.2rem 0;
+  }
+
+  /* Multiplayer lobby */
+  body:not(.touch-ui) #multiplayer .panel {
+    width: min(100%, 980px);
+    max-height: calc(100dvh - 1.7rem);
+    margin: 0 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 1.25rem;
+  }
+
+  body:not(.touch-ui) #multiplayer .panel > h2,
+  body:not(.touch-ui) #multiplayer .panel > .panel-desc,
+  body:not(.touch-ui) #multiplayer .panel > .mp-actions,
+  body:not(.touch-ui) #multiplayer .panel > .panel-hr,
+  body:not(.touch-ui) #multiplayer .panel > .mp-join-bar {
+    flex-shrink: 0;
+  }
+
+  body:not(.touch-ui) #multiplayer .panel > h2 {
+    font-size: clamp(1.25rem, 2.2vh, 1.6rem);
+    margin: 0.2rem 0;
+  }
+
+  body:not(.touch-ui) #multiplayer #mp-host-box {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    margin: 0.4rem 0;
+  }
+
+  body:not(.touch-ui) #multiplayer .mp-host-top {
+    flex-shrink: 0;
+  }
+
+  body:not(.touch-ui) #multiplayer #mp-lobby-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.85fr) minmax(0, 1.15fr);
+    gap: 0.85rem;
+    align-items: stretch;
+  }
+
+  body:not(.touch-ui) #multiplayer .mp-chat {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  body:not(.touch-ui) #multiplayer #mp-chat-log {
+    flex: 1 1 auto;
+    min-height: 5rem;
+    max-height: none;
+    overflow-y: auto;
+  }
+
+  body:not(.touch-ui) #multiplayer .mp-join-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 0.75rem;
+  }
+
+  body:not(.touch-ui) #multiplayer .mp-join-field {
+    flex: 1;
+    min-width: 0;
+  }
+
+  body:not(.touch-ui) #multiplayer .mp-join-actions {
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+  }
+
+  /* Pause / Results */
+  body:not(.touch-ui) #pause .panel,
+  body:not(.touch-ui) #results .panel {
+    width: min(100%, 440px);
+    max-height: calc(100dvh - 2rem);
+    overflow: hidden;
+    margin: auto;
+    padding: clamp(0.9rem, 2vh, 1.35rem);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(0.4rem, 1.2vh, 0.6rem);
+  }
+
+  body:not(.touch-ui) #pause .panel h2,
+  body:not(.touch-ui) #results .panel h2 {
+    font-size: clamp(1.35rem, 2.6vh, 1.75rem);
+    margin: 0 0 0.2rem;
+  }
+
+  body:not(.touch-ui) #pause .menu-btn,
+  body:not(.touch-ui) #results .menu-btn {
+    width: 100%;
+    margin: 0;
+    padding: clamp(0.5rem, 1.5vh, 0.7rem) 0.9rem;
+  }
+
+  body:not(.touch-ui) #results #results-body,
+  body:not(.touch-ui) #results .panel-desc {
+    margin: 0.2rem 0;
+  }
+
+  /* Modals */
+  body:not(.touch-ui) .modal {
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem 1.25rem;
+  }
+
+  body:not(.touch-ui) .modal-panel {
+    width: min(100%, 480px);
+    max-height: calc(100dvh - 2rem);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 1.1rem 1.25rem 1rem;
+  }
+
+  body:not(.touch-ui) .modal-panel.modal-wide,
+  body:not(.touch-ui) .host-modal-panel {
+    width: min(100%, 720px);
+  }
+
+  body:not(.touch-ui) .modal-panel > h2,
+  body:not(.touch-ui) .modal-panel > .panel-desc,
+  body:not(.touch-ui) .modal-panel > .sb-tabs,
+  body:not(.touch-ui) .modal-panel > .modal-footer-actions,
+  body:not(.touch-ui) .modal-panel > .mp-row.modal-footer-actions {
+    flex-shrink: 0;
+  }
+
+  body:not(.touch-ui) .modal-panel > h2 {
+    font-size: clamp(1.2rem, 2.3vh, 1.5rem);
+    margin: 0.15rem 2.25rem 0.4rem 0;
+  }
+
+  body:not(.touch-ui) .modal-panel > .panel-desc {
+    margin-bottom: 0.45rem;
+  }
+
+  body:not(.touch-ui) .modal-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.2rem;
+  }
+
+  body:not(.touch-ui) .modal-form-fit {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  body:not(.touch-ui) .modal-footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 0.75rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--panel-border);
+    flex-shrink: 0;
+  }
+
+  body:not(.touch-ui) .host-modal-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem 0.9rem;
+    margin: 0.4rem 0;
+  }
+
+  body:not(.touch-ui) .host-check-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+
+  body:not(.touch-ui) .host-plane-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem;
+    max-height: min(34vh, 240px);
+    overflow-y: auto;
+  }
+
+  body:not(.touch-ui) .avatar-grid {
+    max-height: min(30vh, 200px);
+    overflow-y: auto;
+  }
+}
+
+/* Shorter desktop landscape — secondary screens */
+@media (orientation: landscape) and (min-width: 900px) and (max-height: 800px) {
+  body:not(.touch-ui) #options.screen,
+  body:not(.touch-ui) #multiplayer.screen,
+  body:not(.touch-ui) #pause.screen,
+  body:not(.touch-ui) #results.screen {
+    padding: 0.5rem 0.85rem;
+  }
+
+  body:not(.touch-ui) #options .settings-shell,
+  body:not(.touch-ui) #multiplayer .panel {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  body:not(.touch-ui) #options .settings-header,
+  body:not(.touch-ui) #options .settings-footer {
+    padding: 0.5rem 0.85rem;
+  }
+
+  body:not(.touch-ui) #options .settings-panels {
+    padding: 0.55rem 0.85rem;
+  }
+
+  body:not(.touch-ui) #options .settings-pane {
+    gap: 0.4rem;
+  }
+
+  body:not(.touch-ui) .modal {
+    padding: 0.55rem 0.85rem;
+  }
+
+  body:not(.touch-ui) .modal-panel {
+    max-height: calc(100dvh - 1.1rem);
+    padding: 0.75rem 0.9rem 0.65rem;
+  }
+
+  body:not(.touch-ui) .host-plane-grid {
+    max-height: min(28vh, 180px);
+  }
+
+  body:not(.touch-ui) #pause .panel,
+  body:not(.touch-ui) #results .panel {
+    padding: 0.7rem 0.9rem;
+    gap: 0.35rem;
+  }
+
+  body:not(.touch-ui) #pause .menu-btn,
+  body:not(.touch-ui) #results .menu-btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.88rem;
+  }
+
+  body:not(.touch-ui) #multiplayer #mp-chat-log {
+    max-height: min(24vh, 160px);
+  }
+}
+
+/* —— Android / touch landscape: fixed split menu (fits 1920×1080, no scroll) —— */
+@media (orientation: landscape) {
   body.touch-ui #menu.screen {
     justify-content: center;
     align-items: stretch;
-    padding: 0.35rem calc(0.5rem + env(safe-area-inset-right, 0px))
-      0.35rem calc(0.5rem + env(safe-area-inset-left, 0px));
+    padding:
+      calc(0.35rem + env(safe-area-inset-top, 0px))
+      calc(0.65rem + env(safe-area-inset-right, 0px))
+      calc(0.35rem + env(safe-area-inset-bottom, 0px))
+      calc(0.65rem + env(safe-area-inset-left, 0px));
+    overflow: hidden;
+    height: 100%;
+    max-height: 100dvh;
   }
 
   body.touch-ui #menu .menu-content {
     display: grid;
-    grid-template-columns: minmax(120px, 34vw) minmax(0, 1fr);
-    grid-template-rows: auto auto 1fr auto;
-    column-gap: 0.75rem;
-    row-gap: 0.25rem;
-    width: min(100%, 720px);
-    max-height: calc(100dvh - 0.7rem);
-    overflow-x: hidden;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 0.35rem 0.5rem;
+    grid-template-columns: minmax(240px, 0.38fr) minmax(0, 0.62fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto auto;
+    align-content: center;
+    column-gap: clamp(0.75rem, 2vw, 1.5rem);
+    row-gap: clamp(0.35rem, 1.2vh, 0.75rem);
+    width: min(100%, 1100px);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    height: 100%;
+    overflow: hidden;
+    padding:
+      clamp(2.4rem, 6vh, 3.2rem)
+      clamp(0.5rem, 1.5vw, 1rem)
+      clamp(0.35rem, 1vh, 0.75rem);
     text-align: start;
     margin: auto;
+    box-sizing: border-box;
+  }
+
+  /* Announce overlay must not push the split grid */
+  body.touch-ui #menu:has(#announce-banner:not(.hidden)) .menu-content {
+    padding-top: clamp(2.4rem, 6vh, 3.2rem);
+  }
+
+  body.touch-ui #menu:has(#announce-banner:not(.hidden)) .menu-topbar {
+    top: 0;
+  }
+
+  body.touch-ui #menu:has(#menu-account-row:not(.hidden)) .menu-content {
+    padding-top: clamp(2.4rem, 6vh, 3.2rem);
+    padding-bottom: clamp(0.35rem, 1vh, 0.75rem);
+  }
+
+  body.touch-ui #menu:has(#menu-account-row:not(.hidden)) .game-logo {
+    width: clamp(200px, 28vw, 320px);
   }
 
   body.touch-ui #menu .menu-brand {
     grid-column: 1;
-    grid-row: 1 / 3;
+    grid-row: 1 / 5;
     align-self: center;
+    justify-self: center;
     margin: 0;
+    text-align: center;
+    max-width: 100%;
+    height: 100%;
+    min-height: 0;
+    justify-content: center;
+  }
+
+  body.touch-ui #menu .menu-plane-stage {
+    width: min(100%, 300px);
+    flex: 1 1 auto;
+    height: auto;
+    min-height: clamp(110px, 26vh, 200px);
+    max-height: min(38vh, 240px);
+    margin-top: 0.4rem;
   }
 
   body.touch-ui #menu .game-logo {
-    width: min(150px, 30vw);
+    width: clamp(200px, 28vw, 320px);
+    max-width: 100%;
+    height: auto;
     animation: none;
   }
 
   body.touch-ui #menu .tagline {
-    font-size: 0.72rem;
-    margin-top: 0.15rem;
+    font-size: clamp(0.75rem, 1.4vh, 0.95rem);
+    margin-top: 0.35rem;
   }
 
   body.touch-ui #menu .plane-picker {
@@ -2114,115 +3104,839 @@ html.lang-fa .modal-panel select {
     margin: 0;
     max-width: none;
     justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: clamp(0.25rem, 0.8vh, 0.45rem);
+  }
+
+  body.touch-ui #menu .plane-btn {
+    width: clamp(44px, 5.2vw, 56px);
+    height: clamp(44px, 5.2vw, 56px);
+    font-size: clamp(1.05rem, 2.2vh, 1.35rem);
+    flex: 0 0 auto;
   }
 
   body.touch-ui #menu .plane-tagline {
     grid-column: 2;
     grid-row: 2;
     margin: 0;
-    font-size: 0.7rem;
+    font-size: clamp(0.72rem, 1.5vh, 0.9rem);
     text-align: start;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  body.touch-ui #menu .map-picker,
-  body.touch-ui #menu .world-seed-line {
+  body.touch-ui #menu .menu-setup-row {
     grid-column: 2;
-    justify-content: flex-start;
-    margin: 0.15rem 0;
-    font-size: 0.72rem;
+    grid-row: 3;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    margin: 0;
+    min-width: 0;
+  }
+
+  body.touch-ui #menu .map-picker {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0;
+    font-size: clamp(0.72rem, 1.4vh, 0.88rem);
+    font-weight: 700;
+  }
+
+  body.touch-ui #menu .map-picker select {
+    margin-top: 0;
+    min-width: 10rem;
+    max-width: min(280px, 36vw);
+    padding: 0.35rem 0.55rem;
+    font-size: inherit;
+  }
+
+  body.touch-ui #menu .world-seed-line {
+    margin: 0;
+    font-size: clamp(0.68rem, 1.3vh, 0.82rem);
+    opacity: 0.85;
+    white-space: nowrap;
   }
 
   body.touch-ui #menu .menu-nav {
-    grid-column: 1 / -1;
+    grid-column: 2;
+    grid-row: 4;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.3rem;
-    margin-top: 0.25rem;
+    gap: clamp(0.3rem, 1vh, 0.5rem);
+    margin: 0;
+    align-content: start;
+    align-self: start;
+    width: 100%;
   }
 
   body.touch-ui #menu .menu-nav .menu-btn {
-    padding: 0.4rem 0.35rem;
-    font-size: 0.75rem;
+    padding: clamp(0.45rem, 1.4vh, 0.7rem) 0.45rem;
+    font-size: clamp(0.78rem, 1.6vh, 0.95rem);
     width: 100%;
   }
 
   body.touch-ui #menu .menu-account-row,
-  body.touch-ui #menu .menu-btn-login,
-  body.touch-ui #menu .hint {
-    grid-column: 1 / -1;
-    margin: 0.2rem 0 0;
-    font-size: 0.72rem;
+  body.touch-ui #menu .menu-btn-login {
+    grid-column: 2;
+    grid-row: 5;
+    margin: 0;
+    font-size: clamp(0.72rem, 1.3vh, 0.85rem);
   }
 
   body.touch-ui #menu .menu-account-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem;
+    gap: 0.35rem;
     justify-content: flex-start;
   }
 
-  /* —— Settings / MP / host modal: scrollable short panels —— */
+  body.touch-ui #menu .menu-account-row .menu-btn,
+  body.touch-ui #menu .menu-btn-login {
+    padding: 0.4rem 0.7rem;
+    font-size: clamp(0.72rem, 1.3vh, 0.85rem);
+  }
+
+  body.touch-ui #menu .hint {
+    grid-column: 2;
+    grid-row: 6;
+    margin: 0;
+    font-size: clamp(0.65rem, 1.2vh, 0.78rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.8;
+  }
+
+  /* Compact announce on touch landscape — overlay, leave room for lang switch */
+  body.touch-ui #menu .announce-banner {
+    top: calc(0.4rem + env(safe-area-inset-top, 0px));
+    left: max(4.5rem, calc(50% - 210px));
+    right: max(4.5rem, calc(50% - 210px));
+    width: auto;
+    max-width: 420px;
+    margin-inline: auto;
+    padding: 0.35rem 0.55rem;
+    gap: 0.35rem;
+    border-radius: 10px;
+    max-height: 3.2rem;
+    z-index: 27;
+  }
+
+  body.touch-ui #menu #announce-text {
+    font-size: 0.74rem;
+    line-height: 1.2;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+  }
+
+  body.touch-ui #menu .announce-close {
+    width: 30px;
+    height: 30px;
+    font-size: 1rem;
+  }
+
+  body.touch-ui #menu .menu-topbar {
+    padding:
+      calc(0.45rem + env(safe-area-inset-top, 0px))
+      calc(0.65rem + env(safe-area-inset-right, 0px))
+      0.35rem
+      calc(0.65rem + env(safe-area-inset-left, 0px));
+  }
+}
+
+/* Extra-tight landscape (phones / short height) */
+@media (orientation: landscape) and (max-height: 520px) {
+  body.touch-ui #menu .menu-content {
+    grid-template-columns: minmax(140px, 0.32fr) minmax(0, 0.68fr);
+    row-gap: 0.2rem;
+    column-gap: 0.55rem;
+    padding-top: 2rem;
+    padding-bottom: 0.25rem;
+  }
+
+  body.touch-ui #menu .game-logo {
+    width: clamp(110px, 22vw, 160px);
+  }
+
+  body.touch-ui #menu .tagline {
+    font-size: 0.65rem;
+  }
+
+  body.touch-ui #menu .plane-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    font-size: 1rem;
+  }
+
+  body.touch-ui #menu .menu-nav .menu-btn {
+    padding: 0.32rem 0.28rem;
+    font-size: 0.7rem;
+  }
+
+  body.touch-ui #menu .hint {
+    display: none;
+  }
+}
+
+/* —— Android / touch landscape: secondary screens (1920×1080, no outer scroll) —— */
+@media (orientation: landscape) {
+  /* Shared: screens never scroll the page */
   body.touch-ui #options.screen,
-  body.touch-ui #multiplayer.screen {
+  body.touch-ui #multiplayer.screen,
+  body.touch-ui #pause.screen,
+  body.touch-ui #results.screen {
     align-items: stretch;
-    justify-content: flex-start;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 0.4rem calc(0.5rem + env(safe-area-inset-right, 0px))
-      0.4rem calc(0.5rem + env(safe-area-inset-left, 0px));
+    justify-content: center;
+    overflow: hidden;
+    height: 100%;
+    max-height: 100dvh;
+    padding:
+      calc(0.4rem + env(safe-area-inset-top, 0px))
+      calc(0.55rem + env(safe-area-inset-right, 0px))
+      calc(0.4rem + env(safe-area-inset-bottom, 0px))
+      calc(0.55rem + env(safe-area-inset-left, 0px));
   }
 
-  body.touch-ui #options .settings-shell,
-  body.touch-ui #multiplayer .panel,
-  body.touch-ui #mp-host-modal .panel {
-    width: min(100%, 640px);
-    max-height: calc(100dvh - 0.8rem);
+  /* Settings shell */
+  body.touch-ui #options .settings-shell {
+    width: min(100%, 980px);
+    max-height: calc(100dvh - 0.9rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     margin: 0 auto;
     overflow: hidden;
     display: flex;
     flex-direction: column;
   }
 
-  body.touch-ui #options .settings-shell h2,
-  body.touch-ui #multiplayer .panel h2 {
-    font-size: 1rem;
-    margin: 0.35rem 0;
+  body.touch-ui #options .settings-header {
+    flex-shrink: 0;
+    padding: 0.55rem 0.85rem;
   }
 
-  body.touch-ui #options .settings-panels,
-  body.touch-ui #multiplayer .panel {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
+  body.touch-ui #options .settings-header h2 {
+    font-size: clamp(1.1rem, 2.4vh, 1.45rem);
+    margin: 0;
+  }
+
+  body.touch-ui #options .settings-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
   }
 
   body.touch-ui #options .settings-nav {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 0.25rem;
+    flex-shrink: 0;
   }
 
-  body.touch-ui #options .settings-nav button {
-    padding: 0.35rem 0.55rem;
+  body.touch-ui #options .settings-panels {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.65rem 0.9rem;
+  }
+
+  body.touch-ui #options .settings-pane {
+    gap: 0.45rem;
+  }
+
+  body.touch-ui #options .setting-row {
+    font-size: clamp(0.8rem, 1.6vh, 0.92rem);
+    gap: 0.65rem;
+  }
+
+  body.touch-ui #options .settings-footer {
+    flex-shrink: 0;
+    padding: 0.55rem 0.85rem;
+    gap: 0.4rem;
+  }
+
+  body.touch-ui #options .settings-footer .menu-btn {
+    padding: 0.45rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  body.touch-ui #options .settings-autodetect {
+    margin: 0.15rem 0;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.82rem;
+  }
+
+  /* Multiplayer lobby — 1920×1080 landscape fit-shell, no outer scroll */
+  body.touch-ui #multiplayer .panel {
+    width: min(100%, 1100px);
+    height: calc(100dvh - 0.8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 0.8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    margin: 0 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0.55rem 0.85rem 0.6rem;
+    gap: 0.35rem;
+    box-sizing: border-box;
+  }
+
+  body.touch-ui #multiplayer .panel > h2,
+  body.touch-ui #multiplayer .panel > .panel-desc,
+  body.touch-ui #multiplayer .panel > .mp-actions,
+  body.touch-ui #multiplayer .panel > .panel-hr,
+  body.touch-ui #multiplayer .panel > .mp-join-bar {
+    flex-shrink: 0;
+  }
+
+  body.touch-ui #multiplayer .panel > h2 {
+    font-size: clamp(1rem, 2.1vh, 1.3rem);
+    margin: 0;
+    padding-inline-start: 2.75rem; /* room for fixed nav-back */
+  }
+
+  body.touch-ui #multiplayer .panel > .panel-desc {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  /* Pre-host: compact Host button */
+  body.touch-ui #multiplayer .mp-actions {
+    margin: 0.15rem 0 0;
+    align-items: flex-start;
+  }
+
+  body.touch-ui #multiplayer .mp-actions .menu-btn {
+    width: auto;
+    min-width: 0;
+    padding: 0.36rem 0.8rem;
+    font-size: 0.8rem;
+  }
+
+  /* Hosting: hide chrome that steals height */
+  body.touch-ui #multiplayer:has(#mp-host-box:not(.hidden)) .panel-desc,
+  body.touch-ui #multiplayer:has(#mp-host-box:not(.hidden)) .mp-actions {
+    display: none;
+  }
+
+  body.touch-ui #multiplayer:has(#mp-host-box:not(.hidden)) .panel-hr {
+    margin: 0.2rem 0;
+  }
+
+  body.touch-ui #multiplayer #mp-host-box {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin: 0;
+    padding: 0.5rem 0.6rem;
+  }
+
+  body.touch-ui #multiplayer .mp-host-top {
+    flex-shrink: 0;
+    gap: 0.3rem;
+  }
+
+  body.touch-ui #multiplayer .mp-host-top .mp-status {
+    font-size: 0.88rem;
+    margin: 0;
+  }
+
+  body.touch-ui #multiplayer .mp-host-top .mp-stay-hint {
+    display: none;
+  }
+
+  body.touch-ui #multiplayer .mp-host-top .mp-code {
+    display: none;
+  }
+
+  body.touch-ui #multiplayer .mp-invite-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 0.4rem;
+    width: 100%;
+  }
+
+  body.touch-ui #multiplayer #mp-invite-url {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 2.45rem;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.84rem;
+    border-radius: 10px;
+  }
+
+  body.touch-ui #multiplayer .mp-invite-row > .menu-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.76rem;
+  }
+
+  /* Players | Actions | Chat */
+  body.touch-ui #multiplayer #mp-lobby-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.85fr) minmax(0, 1.15fr);
+    gap: 0.55rem;
+    align-items: stretch;
+  }
+
+  body.touch-ui #multiplayer .mp-players,
+  body.touch-ui #multiplayer .mp-side-actions,
+  body.touch-ui #multiplayer .mp-chat {
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  body.touch-ui #multiplayer .mp-section-title {
+    font-size: 0.72rem;
+    margin: 0;
+    flex-shrink: 0;
+  }
+
+  body.touch-ui #multiplayer .mp-player-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 0.3rem;
+    overflow: hidden;
+  }
+
+  body.touch-ui #multiplayer .mp-player-list li {
+    padding: 0.4rem 0.5rem;
+    font-size: 0.82rem;
+    border-radius: 8px;
+  }
+
+  body.touch-ui #multiplayer .mp-side-actions {
+    justify-content: flex-start;
+  }
+
+  body.touch-ui #multiplayer .mp-host-controls {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+  }
+
+  body.touch-ui #multiplayer .mp-host-controls.hidden {
+    display: none !important;
+  }
+
+  body.touch-ui #multiplayer .mp-host-controls .menu-btn {
+    width: 100%;
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 0.42rem 0.55rem;
+    font-size: 0.78rem;
+  }
+
+  body.touch-ui #multiplayer .mp-host-controls .menu-btn.primary {
+    padding: 0.5rem 0.55rem;
+    font-size: 0.82rem;
+  }
+
+  body.touch-ui #multiplayer #mp-guest-wait {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.3;
+  }
+
+  body.touch-ui #multiplayer .mp-chat {
+    gap: 0.3rem;
+  }
+
+  body.touch-ui #multiplayer #mp-chat-log {
+    flex: 1 1 auto;
+    min-height: 8vh;
+    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.76rem;
+    padding: 0.35rem 0.45rem;
+  }
+
+  body.touch-ui #multiplayer .mp-chat-row {
+    flex-shrink: 0;
+    display: flex;
+    gap: 0.3rem;
+  }
+
+  body.touch-ui #multiplayer .mp-chat-row input {
+    flex: 1;
+    min-width: 0;
+    min-height: 2.1rem;
+    padding: 0.35rem 0.45rem;
+    font-size: 0.76rem;
+  }
+
+  body.touch-ui #multiplayer .mp-chat-row .menu-btn {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.74rem;
+  }
+
+  /* Join bar: one horizontal line */
+  body.touch-ui #multiplayer .mp-join-bar {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-end;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  body.touch-ui #multiplayer .mp-join-field {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  body.touch-ui #multiplayer .mp-join-field > span {
     font-size: 0.72rem;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body.touch-ui #multiplayer #mp-join-input {
+    min-height: 2.55rem;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.9rem;
+    border-radius: 10px;
+  }
+
+  body.touch-ui #multiplayer .mp-join-actions {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  body.touch-ui #multiplayer .mp-join-actions .menu-btn {
+    padding: 0.48rem 0.7rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  body.touch-ui #multiplayer .menu-btn {
+    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
+  }
+
+  /* Pause / Results — compact, no inner scroll needed @ 1080p */
+  body.touch-ui #pause .panel,
+  body.touch-ui #results .panel {
+    width: min(100%, 420px);
+    max-height: calc(100dvh - 1rem);
+    overflow: hidden;
+    padding: clamp(0.75rem, 2vh, 1.15rem);
+    display: flex;
+    flex-direction: column;
+    gap: clamp(0.35rem, 1.1vh, 0.55rem);
+    margin: auto;
+  }
+
+  body.touch-ui #pause .panel h2,
+  body.touch-ui #results .panel h2 {
+    font-size: clamp(1.2rem, 2.8vh, 1.6rem);
+    margin: 0 0 0.25rem;
+  }
+
+  body.touch-ui #pause .menu-btn,
+  body.touch-ui #results .menu-btn {
+    width: 100%;
+    padding: clamp(0.42rem, 1.4vh, 0.65rem) 0.75rem;
+    font-size: clamp(0.82rem, 1.7vh, 0.95rem);
+    margin: 0;
+  }
+
+  body.touch-ui #results #results-body,
+  body.touch-ui #results .panel-desc {
+    font-size: 0.88rem;
+    margin: 0.15rem 0;
+  }
+
+  /* Modals — fit shell + inner scroll */
+  body.touch-ui .modal {
+    overflow: hidden;
+    align-items: center;
+    justify-content: center;
+    padding:
+      calc(0.45rem + env(safe-area-inset-top, 0px))
+      calc(0.55rem + env(safe-area-inset-right, 0px))
+      calc(0.45rem + env(safe-area-inset-bottom, 0px))
+      calc(0.55rem + env(safe-area-inset-left, 0px));
+    display: flex;
+  }
+
+  body.touch-ui .modal-panel {
+    width: min(100%, 560px);
+    max-height: calc(100dvh - 1.1rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0.85rem 1rem 0.75rem;
+  }
+
+  body.touch-ui .modal-panel.modal-wide,
+  body.touch-ui .host-modal-panel {
+    width: min(100%, 720px);
+  }
+
+  body.touch-ui .modal-panel > h2,
+  body.touch-ui .modal-panel > .panel-desc,
+  body.touch-ui .modal-panel > .sb-tabs,
+  body.touch-ui .modal-panel > .modal-footer-actions,
+  body.touch-ui .modal-panel > .mp-row.modal-footer-actions {
+    flex-shrink: 0;
+  }
+
+  body.touch-ui .modal-panel > h2 {
+    font-size: clamp(1.1rem, 2.4vh, 1.4rem);
+    margin: 0.15rem 2rem 0.35rem 0;
+  }
+
+  body.touch-ui .modal-panel > .panel-desc {
+    margin-bottom: 0.4rem;
+    font-size: 0.85rem;
+  }
+
+  body.touch-ui .modal-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-right: 0.15rem;
+  }
+
+  body.touch-ui .modal-form-fit {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  body.touch-ui .modal-footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: flex-end;
+    margin-top: 0.65rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--panel-border);
+    flex-shrink: 0;
   }
 
   body.touch-ui .host-modal-grid {
     grid-template-columns: 1fr 1fr;
+    gap: 0.35rem 0.6rem;
+    margin: 0.25rem 0;
+  }
+
+  body.touch-ui .host-check-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.28rem 0.5rem;
+    margin-bottom: 0.35rem;
+  }
+
+  body.touch-ui .host-plane-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.28rem 0.5rem;
+    max-height: min(36vh, 180px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 0.4rem;
+  }
+
+  body.touch-ui .host-modal-panel .setting-row {
+    font-size: 0.8rem;
+    margin: 0;
+    min-width: 0;
+  }
+
+  body.touch-ui .host-modal-panel .setting-row span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body.touch-ui .host-modal-panel .setting-note {
+    margin: 0.4rem 0 0.25rem;
+    font-size: 0.7rem;
+  }
+
+  body.touch-ui .host-modal-panel > .panel-desc {
+    font-size: 0.78rem;
+    margin-bottom: 0.25rem;
+  }
+
+  body.touch-ui .avatar-grid {
+    max-height: min(28vh, 180px);
+    overflow-y: auto;
+  }
+
+  body.touch-ui #pwa-gate.pwa-gate {
+    overflow: auto;
+  }
+}
+
+/* Extra-tight secondary screens on short landscape phones */
+@media (orientation: landscape) and (max-height: 520px) {
+  body.touch-ui #options .settings-body {
+    flex-direction: column;
+  }
+
+  body.touch-ui #options .settings-nav {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    border-inline-end: none;
+    border-bottom: 1px solid var(--panel-border);
+    padding: 0.4rem;
+    gap: 0.25rem;
+  }
+
+  body.touch-ui #options .settings-nav button {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.7rem;
+    white-space: nowrap;
+  }
+
+  body.touch-ui #multiplayer .panel {
+    padding: 0.4rem 0.6rem 0.45rem;
+    gap: 0.25rem;
+  }
+
+  body.touch-ui #multiplayer .panel > h2 {
+    font-size: 0.95rem;
+    padding-inline-start: 2.5rem;
+  }
+
+  body.touch-ui #multiplayer #mp-lobby-panel {
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 0.8fr) minmax(0, 1.1fr);
     gap: 0.4rem;
   }
 
-  body.touch-ui .host-check-grid,
-  body.touch-ui .host-plane-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.3rem;
+  body.touch-ui #multiplayer #mp-host-box {
+    padding: 0.4rem 0.45rem;
+    gap: 0.35rem;
   }
 
+  body.touch-ui #multiplayer #mp-invite-url {
+    min-height: 2.2rem;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.78rem;
+  }
+
+  body.touch-ui #multiplayer #mp-join-input {
+    min-height: 2.3rem;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.84rem;
+  }
+
+  body.touch-ui #multiplayer .mp-join-actions .menu-btn {
+    padding: 0.4rem 0.55rem;
+    font-size: 0.74rem;
+  }
+
+  body.touch-ui #multiplayer .mp-host-controls .menu-btn {
+    padding: 0.35rem 0.45rem;
+    font-size: 0.72rem;
+  }
+
+  body.touch-ui #multiplayer #mp-chat-log {
+    min-height: 6vh;
+  }
+
+  body.touch-ui .host-modal-panel {
+    padding: 0.5rem 0.65rem 0.45rem;
+    max-height: calc(100dvh - 0.55rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+
+  body.touch-ui .host-modal-panel > h2 {
+    font-size: 0.98rem;
+    margin: 0.05rem 1.6rem 0.15rem 0;
+  }
+
+  body.touch-ui .host-modal-panel > .panel-desc {
+    display: none;
+  }
+
+  body.touch-ui .host-modal-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem 0.45rem;
+    margin: 0.15rem 0;
+  }
+
+  body.touch-ui .host-plane-grid,
+  body.touch-ui .host-check-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.2rem 0.4rem;
+  }
+
+  body.touch-ui .host-plane-grid {
+    max-height: min(26vh, 120px);
+  }
+
+  body.touch-ui .host-modal-panel .setting-row {
+    font-size: 0.72rem;
+  }
+
+  body.touch-ui .host-modal-panel .setting-row select,
+  body.touch-ui .host-modal-panel .setting-row input[type='number'] {
+    font-size: 0.72rem;
+    padding: 0.25rem 0.35rem;
+    min-height: 1.7rem;
+  }
+
+  body.touch-ui .host-modal-panel .setting-note {
+    margin: 0.25rem 0 0.15rem;
+    font-size: 0.65rem;
+  }
+
+  body.touch-ui .host-modal-panel .modal-footer-actions {
+    margin-top: 0.35rem;
+    padding-top: 0.35rem;
+    gap: 0.35rem;
+  }
+
+  body.touch-ui .host-modal-panel .menu-btn {
+    padding: 0.38rem 0.65rem;
+    font-size: 0.78rem;
+  }
+}
+
+/* Landscape phones — compact HUD / sticks (settings handled above) */
+@media (orientation: landscape) and (max-height: 520px),
+  (orientation: landscape) and (max-width: 960px) {
   body.touch-ui .hud-top {
     top: calc(0.25rem + env(safe-area-inset-top, 0px));
     gap: 0.28rem;
     padding: 0 3.5rem;
     justify-content: center;
+  }
+
+  body.touch-ui .hud-chat {
+    top: calc(2.55rem + env(safe-area-inset-top, 0px));
+    width: min(180px, 32vw);
+  }
+
+  body.touch-ui .hud-chat-log {
+    max-height: 2.4rem;
   }
 
   body.touch-ui .hud-panel {
@@ -2342,46 +4056,110 @@ html.lang-fa .modal-panel select {
   }
 }
 
-/* Portrait: force landscape to play */
+/* Portrait prompt removed — PWA manifest + Orientation.lock keep landscape */
 #rotate-lock {
-  position: absolute;
-  inset: 0;
-  z-index: 90;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(6, 18, 32, 0.94);
-  pointer-events: auto;
-  padding: 1.5rem;
-  text-align: center;
-}
-
-#rotate-lock.hidden {
   display: none !important;
 }
 
-.rotate-lock-card {
-  max-width: 280px;
+/* Keep in-app back so user can leave without Android system back */
+body.touch-ui.force-landscape.portrait-locked #nav-back:not(.hidden) {
+  visibility: visible;
+  display: flex;
+  z-index: 95;
 }
 
-.rotate-lock-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  animation: rotateHint 1.6s ease-in-out infinite;
+/* —— PWA install gate (mobile browser only) —— */
+.pwa-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 20%, rgba(40, 110, 180, 0.45), transparent 60%),
+    linear-gradient(165deg, #0a1a2a 0%, #12283a 45%, #0c1824 100%);
+  overflow: auto;
 }
 
-.rotate-lock-card p {
+.pwa-gate.hidden {
+  display: none !important;
+}
+
+.pwa-gate-card {
+  width: min(420px, 100%);
+  text-align: center;
+  color: var(--text, #e8f1fa);
+}
+
+.pwa-gate-logo {
+  width: min(240px, 70vw);
+  height: auto;
+  margin: 0 auto 1rem;
+  display: block;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.35));
+}
+
+.pwa-gate-card h2 {
+  margin: 0 0 0.65rem;
+  font-size: clamp(1.15rem, 4.5vw, 1.55rem);
   font-weight: 800;
-  font-size: 1.1rem;
-  line-height: 1.4;
-  color: var(--text);
+  letter-spacing: 0.02em;
 }
 
-@keyframes rotateHint {
-  0%, 100% { transform: rotate(0deg); }
-  40% { transform: rotate(90deg); }
-  60% { transform: rotate(90deg); }
+.pwa-gate-card > p {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  opacity: 0.9;
 }
+
+.pwa-steps {
+  text-align: start;
+  margin: 0 auto 1.1rem;
+  padding: 0.85rem 1rem 0.85rem 1.75rem;
+  max-width: 360px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.pwa-steps li {
+  margin: 0.35rem 0;
+}
+
+.pwa-gate .menu-btn {
+  min-width: 180px;
+  margin: 0.25rem auto;
+}
+
+.pwa-status {
+  margin: 0.85rem 0 0;
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+body.pwa-gate-active #menu,
+body.pwa-gate-active #options,
+body.pwa-gate-active #multiplayer,
+body.pwa-gate-active #pause,
+body.pwa-gate-active #results,
+body.pwa-gate-active #hud,
+body.pwa-gate-active #touch,
+body.pwa-gate-active #mp-host-modal,
+body.pwa-gate-active #nav-back {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+body.pwa-gate-active #game-canvas {
+  filter: blur(6px) brightness(0.45);
+}
+
+.auth-error { color: #f87171; font-size: 0.85rem; margin: 0.5rem 0; }
 
 .nav-back {
   position: fixed;
@@ -2416,35 +4194,6 @@ body.touch-ui .nav-back.hidden {
   display: none;
 }
 
-/* Portrait overlay — hide game chrome when landscape is required */
-body.touch-ui.force-landscape.portrait-locked #rotate-lock {
-  display: flex !important;
-}
-
-body.touch-ui.force-landscape.portrait-locked #touch,
-body.touch-ui.force-landscape.portrait-locked #hud,
-body.touch-ui.force-landscape.portrait-locked #options,
-body.touch-ui.force-landscape.portrait-locked #multiplayer,
-body.touch-ui.force-landscape.portrait-locked #pause,
-body.touch-ui.force-landscape.portrait-locked #results,
-body.touch-ui.force-landscape.portrait-locked #mp-host-modal {
-  visibility: hidden;
-}
-
-/* Keep in-app back so user can leave without Android system back */
-body.touch-ui.force-landscape.portrait-locked #nav-back:not(.hidden) {
-  visibility: visible;
-  display: flex;
-  z-index: 95;
-}
-
-/* Main menu may stay portrait */
-body.touch-ui.menu-portrait-ok #menu {
-  visibility: visible;
-}
-
-.auth-error { color: #f87171; font-size: 0.85rem; margin: 0.5rem 0; }
-
 .sb-tabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
 .sb-tab {
   background: rgba(0, 0, 0, 0.25);
@@ -2461,5 +4210,209 @@ body.touch-ui.menu-portrait-ok #menu {
 .scoreboard-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .scoreboard-table th,
 .scoreboard-table td { padding: 0.45rem 0.35rem; border-bottom: 1px solid var(--panel-border); text-align: left; }
+
+/* —— Inbox / Friends —— */
+.btn-inbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 2.4rem;
+  padding: 0.35rem 0.55rem;
+}
+.inbox-badge {
+  position: absolute;
+  top: -0.25rem;
+  inset-inline-end: -0.25rem;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: #e85d4c;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.inbox-badge.hidden { display: none; }
+
+.inbox-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(12rem, 0.9fr);
+  gap: 1rem;
+  align-items: start;
+}
+.inbox-main,
+.inbox-friends {
+  min-width: 0;
+}
+.inbox-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+.inbox-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+  font-size: 0.85rem;
+}
+.inbox-bulk-bar.hidden { display: none; }
+.inbox-select-all-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: min(52vh, 28rem);
+  overflow: auto;
+}
+.inbox-empty {
+  opacity: 0.75;
+  padding: 0.75rem 0.25rem;
+  font-size: 0.9rem;
+}
+.inbox-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.55rem;
+  align-items: start;
+  padding: 0.55rem 0.65rem;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+}
+.inbox-row.inbox-row-unread {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 12%, rgba(0, 0, 0, 0.18));
+}
+.inbox-check { margin-top: 0.2rem; }
+.inbox-row-body { min-width: 0; }
+.inbox-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  align-items: center;
+  font-size: 0.72rem;
+  opacity: 0.8;
+  margin-bottom: 0.2rem;
+}
+.inbox-kind {
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.inbox-locked { cursor: help; }
+.inbox-title {
+  font-weight: 700;
+  margin: 0 0 0.15rem;
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+.inbox-body {
+  margin: 0;
+  font-size: 0.88rem;
+  opacity: 0.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.inbox-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+.inbox-friends h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+.friends-search-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+.friends-search-row input { flex: 1; min-width: 0; }
+.friends-search-results,
+.friends-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+.friends-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  background: rgba(0, 0, 0, 0.16);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  font-size: 0.88rem;
+}
+.friends-row > span { font-weight: 700; min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.friends-row .menu-btn { flex-shrink: 0; }
+.friend-online {
+  color: #6dce7c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin-inline-start: 0.35rem;
+}
+
+@media (max-width: 760px) {
+  .inbox-layout {
+    grid-template-columns: 1fr;
+  }
+  .inbox-list { max-height: min(40vh, 22rem); }
+}
+
+/* touch landscape: inbox fit-shell */
+body.touch-ui.landscape #inbox.screen.active .panel {
+  max-height: calc(100dvh - 1.25rem);
+  overflow: auto;
+}
+body.touch-ui.landscape #inbox .inbox-layout {
+  grid-template-columns: minmax(0, 1.35fr) minmax(10rem, 0.85fr);
+  gap: 0.65rem;
+}
+body.touch-ui.landscape #inbox .inbox-list {
+  max-height: min(58dvh, 18rem);
+}
+body.touch-ui.landscape #inbox .panel-desc,
+body.touch-ui.landscape #inbox h2 {
+  margin-top: 0;
+}
+body.touch-ui.landscape #inbox .inbox-row {
+  padding: 0.4rem 0.5rem;
+}
+body.touch-ui.landscape #inbox .inbox-row-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+@media (max-height: 420px) and (orientation: landscape) {
+  body.touch-ui #inbox .inbox-layout {
+    grid-template-columns: 1fr 1fr;
+  }
+  body.touch-ui #inbox .inbox-list {
+    max-height: min(48dvh, 14rem);
+  }
+  body.touch-ui #inbox .friends-search-row {
+    flex-wrap: wrap;
+  }
+}
 
 /* modals */

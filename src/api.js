@@ -5,7 +5,8 @@ const DEVICE_KEY = 'poky_device_fp';
 
 let accessToken = localStorage.getItem(ACCESS_KEY) || '';
 let currentUser = null;
-let onAuthChange = null;
+/** @type {Set<(user: object|null) => void>} */
+const authListeners = new Set();
 
 export function getDeviceFingerprint() {
   let fp = localStorage.getItem(DEVICE_KEY);
@@ -29,11 +30,19 @@ export function isLoggedIn() {
 }
 
 export function onAuthChanged(cb) {
-  onAuthChange = cb;
+  if (typeof cb !== 'function') return () => {};
+  authListeners.add(cb);
+  return () => authListeners.delete(cb);
 }
 
 function emitAuth() {
-  onAuthChange?.(currentUser);
+  for (const cb of authListeners) {
+    try {
+      cb(currentUser);
+    } catch (e) {
+      console.warn('[auth]', e);
+    }
+  }
 }
 
 function setAccessToken(token) {
@@ -186,4 +195,64 @@ export async function fetchAnnouncement() {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return null;
   return data.announcement || null;
+}
+
+/* —— Friends & Inbox —— */
+export async function listFriends() {
+  return api('/friends');
+}
+
+export async function listFriendRequests() {
+  return api('/friends/requests');
+}
+
+export async function lookupFriends(q) {
+  return api(`/friends/lookup?q=${encodeURIComponent(q || '')}`);
+}
+
+export async function requestFriend(payload) {
+  return api('/friends/request', { method: 'POST', body: payload });
+}
+
+export async function acceptFriend(requestId) {
+  return api(`/friends/requests/${requestId}/accept`, { method: 'POST' });
+}
+
+export async function denyFriend(requestId) {
+  return api(`/friends/requests/${requestId}/deny`, { method: 'POST' });
+}
+
+export async function removeFriend(friendId) {
+  return api(`/friends/${friendId}`, { method: 'DELETE' });
+}
+
+export async function sendLobbyInvite(friendId, { roomId, inviteUrl }) {
+  return api(`/friends/${friendId}/lobby-invite`, {
+    method: 'POST',
+    body: { roomId, inviteUrl },
+  });
+}
+
+export async function listInbox(opts = {}) {
+  const q = new URLSearchParams();
+  if (opts.limit) q.set('limit', String(opts.limit));
+  if (opts.unreadOnly) q.set('unreadOnly', '1');
+  const qs = q.toString();
+  return api(`/inbox${qs ? `?${qs}` : ''}`);
+}
+
+export async function inboxUnreadCount() {
+  return api('/inbox/unread-count');
+}
+
+export async function inboxMarkRead(ids) {
+  return api('/inbox/read', { method: 'POST', body: { ids } });
+}
+
+export async function inboxMarkUnread(ids) {
+  return api('/inbox/unread', { method: 'POST', body: { ids } });
+}
+
+export async function inboxDelete(ids) {
+  return api('/inbox/delete', { method: 'POST', body: { ids } });
 }

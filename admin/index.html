@@ -37,6 +37,7 @@
       <button type="button" class="tab active" data-tab="online">Online</button>
       <button type="button" class="tab" data-tab="users">Users</button>
       <button type="button" class="tab" data-tab="announcement">Announcement</button>
+      <button type="button" class="tab" data-tab="messages">Messages</button>
       <button type="button" class="tab" data-tab="ipbans">IP Bans</button>
       <button type="button" class="tab" data-tab="security">Security Log</button>
     </nav>
@@ -80,6 +81,51 @@
           </div>
           <p id="ann-updated" class="muted-note"></p>
         </form>
+      </div>
+
+      <div id="tab-messages" class="tab-pane hidden">
+        <p class="pane-desc">Send inbox messages to one player or broadcast to every account.</p>
+        <form id="inbox-msg-form" class="announce-form">
+          <fieldset class="mode-fieldset">
+            <legend>Delivery</legend>
+            <label class="check-row">
+              <input type="radio" name="inbox-mode" value="single" checked />
+              <span>Single user</span>
+            </label>
+            <label class="check-row">
+              <input type="radio" name="inbox-mode" value="broadcast" />
+              <span>Broadcast to all</span>
+            </label>
+          </fieldset>
+          <label id="inbox-user-wrap">
+            Recipient user ID
+            <input type="text" id="inbox-user-id" placeholder="UUID from Users tab" />
+          </label>
+          <label>
+            Title
+            <input type="text" id="inbox-title" maxlength="200" required placeholder="Message title" />
+          </label>
+          <label>
+            Body
+            <textarea id="inbox-body" rows="4" maxlength="4000" placeholder="Optional details…"></textarea>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" id="inbox-allow-delete" checked />
+            <span>Allow players to delete this message</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit">Send message</button>
+            <span id="inbox-status" class="status-msg hidden"></span>
+          </div>
+        </form>
+        <h3 class="subhead">Recent admin sends</h3>
+        <button type="button" class="refresh" data-refresh="messages">Refresh</button>
+        <table>
+          <thead>
+            <tr><th>When</th><th>Title</th><th>Recipients</th><th>Deletable</th></tr>
+          </thead>
+          <tbody id="inbox-recent-body"></tbody>
+        </table>
       </div>
 
       <div id="tab-ipbans" class="tab-pane hidden">

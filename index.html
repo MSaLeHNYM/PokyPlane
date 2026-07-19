@@ -6,10 +6,13 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="screen-orientation" content="any" />
+  <meta name="apple-mobile-web-app-title" content="PokyPlane" />
+  <meta name="theme-color" content="#1a4a7a" />
+  <meta name="screen-orientation" content="landscape" />
+  <link rel="manifest" href="./manifest.webmanifest" />
   <title>PokyPlane — Arcade Flight Simulator</title>
   <link rel="icon" type="image/png" href="/favicon.png" />
-  <link rel="apple-touch-icon" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="stylesheet" href="/src/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -95,11 +98,27 @@
       <div id="damage-vignette"></div>
     </div>
 
-    <!-- Force landscape on phones -->
+    <!-- Mobile browser blocked — install PWA to play -->
+    <div id="pwa-gate" class="pwa-gate hidden" aria-hidden="true" role="dialog" aria-labelledby="pwa-gate-title">
+      <div class="pwa-gate-card">
+        <img src="./logo.png" alt="PokyPlane" class="pwa-gate-logo" width="280" height="80" />
+        <h2 id="pwa-gate-title" data-i18n="pwaGateTitle">Install PokyPlane to play</h2>
+        <p data-i18n="pwaGateBody">On phones and tablets, PokyPlane only runs as an installed app (PWA) in landscape. Playing in the mobile browser is disabled.</p>
+        <ol class="pwa-steps">
+          <li data-i18n="pwaStep1">Open this site in Chrome (Android) or Safari (iPhone)</li>
+          <li data-i18n="pwaStep2">Use the browser menu → Install app / Add to Home Screen</li>
+          <li data-i18n="pwaStep3">Open PokyPlane from your home screen</li>
+        </ol>
+        <button type="button" id="pwa-install-btn" class="menu-btn primary hidden" data-i18n="pwaInstall">Install app</button>
+        <p id="pwa-status" class="pwa-status" data-i18n="pwaWaiting">After installing, launch the app from your home screen.</p>
+      </div>
+    </div>
+
+    <!-- Soft landscape nudge only if portrait while in installed PWA -->
     <div id="rotate-lock" class="hidden" aria-live="polite">
       <div class="rotate-lock-card">
-        <div class="rotate-lock-icon" aria-hidden="true">📱↻</div>
-        <p data-i18n="rotateLandscape">Rotate your phone to landscape to fly</p>
+        <div class="rotate-lock-icon" aria-hidden="true">📱</div>
+        <p data-i18n="rotateLandscape">Hold your phone sideways — PokyPlane is landscape only</p>
       </div>
     </div>
 
@@ -126,6 +145,7 @@
           <img src="/logo.png" alt="PokyPlane" class="game-logo" width="400" height="115" />
           <h1 class="logo logo-sr">Poky<span>Plane</span></h1>
           <p class="tagline" data-i18n="tagline">Arcade skies, cozy vibes</p>
+          <div class="menu-plane-stage" id="menu-plane-stage" aria-hidden="true"></div>
         </div>
         <div class="plane-picker" id="plane-picker" role="listbox" aria-label="Aircraft">
           <button type="button" class="plane-btn active" data-plane="0" title="Poky Cub">🛩️</button>
@@ -138,20 +158,22 @@
           <button type="button" class="plane-btn" data-plane="7" title="Neon Racer">🏎️</button>
         </div>
         <p class="plane-tagline" id="plane-tagline"></p>
-        <label class="map-picker">
-          <span data-i18n="mapSelect">Map</span>
-          <select id="menu-map">
-            <option value="meadow">Green Meadows</option>
-            <option value="desert">Sunscar Desert</option>
-            <option value="arctic">Frostbite Peaks</option>
-            <option value="islands">Coral Archipelago</option>
-            <option value="volcanic">Ember Crater</option>
-          </select>
-        </label>
-        <p class="world-seed-line">
-          <span data-i18n="worldSeed">World seed</span>:
-          <code id="menu-world-seed">—</code>
-        </p>
+        <div class="menu-setup-row">
+          <label class="map-picker">
+            <span data-i18n="mapSelect">Map</span>
+            <select id="menu-map">
+              <option value="meadow">Green Meadows</option>
+              <option value="desert">Sunscar Desert</option>
+              <option value="arctic">Frostbite Peaks</option>
+              <option value="islands">Coral Archipelago</option>
+              <option value="volcanic">Ember Crater</option>
+            </select>
+          </label>
+          <p class="world-seed-line">
+            <span data-i18n="worldSeed">World seed</span>:
+            <code id="menu-world-seed">—</code>
+          </p>
+        </div>
         <nav class="menu-nav">
           <button type="button" class="menu-btn primary" data-action="start-freeroam" data-i18n="freeRoam">Free Roam</button>
           <button type="button" class="menu-btn" data-action="start-race" data-i18n="ringRace">Ring Race</button>
@@ -160,6 +182,10 @@
           <button type="button" class="menu-btn" data-action="options" data-i18n="settings">Settings</button>
         </nav>
         <div class="menu-account-row hidden" id="menu-account-row">
+          <button type="button" class="menu-btn menu-btn-sm btn-inbox" id="btn-inbox">
+            <span data-i18n="inbox">Inbox</span>
+            <span id="inbox-badge" class="inbox-badge hidden">0</span>
+          </button>
           <button type="button" class="menu-btn menu-btn-sm" id="btn-scoreboard" data-i18n="scoreboard">Scoreboard</button>
           <button type="button" class="menu-btn menu-btn-sm" id="btn-profile" data-i18n="profile">Profile</button>
           <button type="button" class="menu-btn menu-btn-sm" id="btn-logout" data-i18n="logout">Logout</button>
@@ -175,16 +201,19 @@
         <h2 data-i18n="multiplayerLobby">Multiplayer Lobby</h2>
         <p class="panel-desc" data-i18n="shareHint">Send this link to a friend — they join the same sky.</p>
 
-        <div class="mp-actions" style="margin-top:0.75rem">
+        <div class="mp-actions">
           <button type="button" class="menu-btn primary" data-action="mp-host-open" data-i18n="hostMatch">Host a Match</button>
         </div>
         <div id="mp-host-box" class="mp-box hidden">
-          <p id="mp-status" class="mp-status"></p>
-          <p class="hint mp-stay-hint" data-i18n="stayOnLobby">Stay on this screen until your friend joins</p>
-          <code id="mp-room-code" class="mp-code"></code>
-          <div class="mp-row">
-            <input type="text" id="mp-invite-url" readonly />
-            <button type="button" class="menu-btn" data-action="mp-copy" data-i18n="copyLink">Copy Invite Link</button>
+          <div class="mp-host-top">
+            <p id="mp-status" class="mp-status"></p>
+            <p class="hint mp-stay-hint" data-i18n="stayOnLobby">Stay on this screen until your friend joins</p>
+            <code id="mp-room-code" class="mp-code"></code>
+            <div class="mp-row mp-invite-row">
+              <input type="text" id="mp-invite-url" readonly />
+              <button type="button" class="menu-btn" data-action="mp-copy" data-i18n="copyLink">Copy Invite Link</button>
+              <button type="button" class="menu-btn primary hidden" id="mp-invite-friend" data-i18n="inviteFriend">Invite friend</button>
+            </div>
           </div>
 
           <div id="mp-lobby-panel" class="mp-lobby-panel">
@@ -192,33 +221,79 @@
               <h3 class="mp-section-title" data-i18n="mpPlayers">Players</h3>
               <ul id="mp-player-list" class="mp-player-list"></ul>
             </div>
-            <div id="mp-host-controls" class="mp-host-controls hidden">
-              <button type="button" class="menu-btn" data-action="mp-edit-settings" data-i18n="editHostSettings">Edit settings</button>
-              <button type="button" class="menu-btn danger" data-action="mp-kick" id="mp-kick-btn" disabled data-i18n="kick">Kick</button>
-              <button type="button" class="menu-btn primary" data-action="mp-start" id="mp-start-btn" disabled data-i18n="startMatch">Start match</button>
+            <div class="mp-side-actions">
+              <div id="mp-host-controls" class="mp-host-controls hidden">
+                <button type="button" class="menu-btn" data-action="mp-edit-settings" data-i18n="editHostSettings">Edit settings</button>
+                <button type="button" class="menu-btn danger" data-action="mp-kick" id="mp-kick-btn" disabled data-i18n="kick">Kick</button>
+                <button type="button" class="menu-btn primary" data-action="mp-start" id="mp-start-btn" disabled data-i18n="startMatch">Start match</button>
+              </div>
+              <p id="mp-guest-wait" class="hint hidden" data-i18n="waitingHostStart">Waiting for host to start…</p>
             </div>
-            <p id="mp-guest-wait" class="hint hidden" data-i18n="waitingHostStart">Waiting for host to start…</p>
-          </div>
-
-          <div class="mp-chat">
-            <h3 class="mp-section-title" data-i18n="chat">Chat</h3>
-            <div id="mp-chat-log" class="mp-chat-log" aria-live="polite"></div>
-            <div class="mp-chat-row">
-              <input type="text" id="mp-chat-input" maxlength="120" data-i18n-placeholder="chatPlaceholder" placeholder="Message…" autocomplete="off" />
-              <button type="button" class="menu-btn" data-action="mp-chat-send" data-i18n="chatSend">Send</button>
+            <div class="mp-chat">
+              <h3 class="mp-section-title" data-i18n="chat">Chat</h3>
+              <div id="mp-chat-log" class="mp-chat-log" aria-live="polite"></div>
+              <div class="mp-chat-row">
+                <input type="text" id="mp-chat-input" maxlength="120" data-i18n-placeholder="chatPlaceholder" placeholder="Message…" autocomplete="off" />
+                <button type="button" class="menu-btn" data-action="mp-chat-send" data-i18n="chatSend">Send</button>
+              </div>
             </div>
           </div>
         </div>
         <hr class="panel-hr" />
-        <label class="stack-label">
-          <span data-i18n="joinMatch">Join via Link / Code</span>
-          <input type="text" id="mp-join-input" data-i18n-placeholder="pasteCode" placeholder="Paste room code" />
-        </label>
-        <div class="mp-row">
-          <button type="button" class="menu-btn primary" data-action="mp-join" data-i18n="join">Join</button>
-          <button type="button" class="menu-btn" data-action="mp-disconnect" data-i18n="disconnect">Disconnect</button>
+        <div class="mp-join-bar">
+          <label class="stack-label mp-join-field">
+            <span data-i18n="joinMatch">Join via Link / Code</span>
+            <input type="text" id="mp-join-input" data-i18n-placeholder="pasteCode" placeholder="Paste room code" />
+          </label>
+          <div class="mp-row mp-join-actions">
+            <button type="button" class="menu-btn primary" data-action="mp-join" data-i18n="join">Join</button>
+            <button type="button" class="menu-btn" data-action="mp-disconnect" data-i18n="disconnect">Disconnect</button>
+            <button type="button" class="menu-btn" data-action="close-multiplayer" data-i18n="back">Back</button>
+          </div>
         </div>
-        <button type="button" class="menu-btn" data-action="close-multiplayer" data-i18n="back">Back</button>
+      </div>
+    </div>
+
+    <!-- Inbox + Friends -->
+    <div id="inbox" class="screen hidden">
+      <div class="panel panel-wide inbox-shell">
+        <h2 data-i18n="inbox">Inbox</h2>
+        <p class="panel-desc" data-i18n="inboxDesc">Friend requests, admin messages, and lobby invites.</p>
+
+        <div class="inbox-layout">
+          <section class="inbox-main">
+            <div class="inbox-filters" role="tablist">
+              <button type="button" class="sb-tab active" data-inbox-filter="all" data-i18n="inboxAll">All</button>
+              <button type="button" class="sb-tab" data-inbox-filter="unread" data-i18n="inboxUnread">Unread</button>
+              <button type="button" class="sb-tab" data-inbox-filter="requests" data-i18n="inboxRequests">Requests</button>
+              <button type="button" class="sb-tab" data-inbox-filter="invites" data-i18n="inboxInvites">Invites</button>
+              <button type="button" class="sb-tab" data-inbox-filter="admin" data-i18n="inboxAdmin">Admin</button>
+            </div>
+            <div id="inbox-bulk-bar" class="inbox-bulk-bar hidden">
+              <span><span id="inbox-selected-count">0</span> <span data-i18n="selected">selected</span></span>
+              <button type="button" class="menu-btn menu-btn-sm" id="inbox-bulk-read" data-i18n="markRead">Mark read</button>
+              <button type="button" class="menu-btn menu-btn-sm" id="inbox-bulk-unread" data-i18n="markUnread">Mark unread</button>
+              <button type="button" class="menu-btn menu-btn-sm danger" id="inbox-bulk-delete" data-i18n="delete">Delete</button>
+            </div>
+            <label class="inbox-select-all-row">
+              <input type="checkbox" id="inbox-select-all" />
+              <span data-i18n="selectAll">Select all</span>
+            </label>
+            <div id="inbox-list" class="inbox-list modal-scroll"></div>
+          </section>
+
+          <aside class="inbox-friends">
+            <h3 class="mp-section-title" data-i18n="friends">Friends</h3>
+            <div class="friends-search-row">
+              <input type="search" id="friends-search-input" data-i18n-placeholder="searchUsername" placeholder="Search username…" autocomplete="off" />
+              <button type="button" class="menu-btn menu-btn-sm" id="friends-search-btn" data-i18n="search">Search</button>
+            </div>
+            <div id="friends-search-results" class="friends-search-results"></div>
+            <div id="friends-list" class="friends-list"></div>
+          </aside>
+        </div>
+
+        <button type="button" class="menu-btn" data-action="close-inbox" data-i18n="back">Back</button>
       </div>
     </div>
 
@@ -260,6 +335,7 @@
                   <option value="max" data-i18n="max">Max (Ultra)</option>
                 </select>
               </label>
+              <button type="button" class="menu-btn settings-autodetect" data-action="graphics-autodetect" data-i18n="graphicsAutoDetect">Auto-detect best (60 FPS)</button>
               <label class="setting-row">
                 <span data-i18n="masterVolume">Master Volume</span>
                 <input type="range" id="set-master-simple" min="0" max="100" value="70" />
@@ -320,6 +396,8 @@
                   <option value="max" data-i18n="max">Max (Ultra)</option>
                 </select>
               </label>
+              <button type="button" id="graphics-autodetect" class="menu-btn settings-autodetect" data-action="graphics-autodetect" data-i18n="graphicsAutoDetect">Auto-detect best (60 FPS)</button>
+              <p class="setting-note" data-i18n="graphicsAutoDetectHint">Tests low → max on this device and picks the highest preset that can hold about 60 FPS. Graphics stay on this device only.</p>
               <p class="setting-note" data-i18n="maxNote">Cinematic visuals — needs a strong GPU. Reload after switching for full antialiasing.</p>
               <label class="setting-row">
                 <span data-i18n="fpsCap">FPS Cap</span>
@@ -471,6 +549,10 @@
 
               <div class="keybind-section" id="keybind-section">
                 <h3 class="settings-subhead" data-i18n="controls">Controls</h3>
+                <div class="touch-layout-settings touch-only-ui hidden">
+                  <p class="setting-note" data-i18n="touchLayoutDesc">Customize joystick and button size and position on your phone.</p>
+                  <button type="button" class="menu-btn primary" data-action="touch-layout-edit" data-i18n="touchLayoutEdit">Customize touch controls</button>
+                </div>
                 <p class="setting-note keybind-touch-note hidden" data-i18n="keybindTouchNote">On phones, use the on-screen stick and buttons. Keyboard remapping is optional.</p>
                 <p class="setting-note" data-i18n="keybindHint">Click a key to rebind. Avoid Ctrl — browsers use Ctrl+W to close tabs.</p>
                 <div class="keybind-grid" id="keybind-grid">
@@ -530,7 +612,9 @@
       <div class="panel">
         <h2 data-i18n="paused">Paused</h2>
         <button type="button" class="menu-btn primary" data-action="resume" data-i18n="resume">Resume</button>
+        <button type="button" class="menu-btn touch-only-ui hidden" data-action="touch-layout-edit" data-i18n="touchLayoutEdit">Customize touch controls</button>
         <button type="button" class="menu-btn" data-action="restart" data-i18n="restart">Restart</button>
+        <button type="button" class="menu-btn hidden" id="mp-end-match-btn" data-action="mp-end-match" data-i18n="endMatch">End Match</button>
         <button type="button" class="menu-btn" data-action="options-from-pause" data-i18n="settings">Settings</button>
         <button type="button" class="menu-btn" data-action="quit" data-i18n="quitMenu">Quit to Menu</button>
       </div>
@@ -541,27 +625,53 @@
       <div class="panel">
         <h2 id="results-title" data-i18n="flightComplete">Flight Complete!</h2>
         <p id="results-body"></p>
-        <button type="button" class="menu-btn primary" data-action="restart" data-i18n="flyAgain">Fly Again</button>
-        <button type="button" class="menu-btn" data-action="quit" data-i18n="menu">Menu</button>
+        <div id="results-solo-actions">
+          <button type="button" class="menu-btn primary" data-action="restart" data-i18n="flyAgain">Fly Again</button>
+          <button type="button" class="menu-btn" data-action="quit" data-i18n="menu">Menu</button>
+        </div>
+        <div id="results-mp-actions" class="hidden">
+          <p id="results-vote-status" class="panel-desc"></p>
+          <button type="button" class="menu-btn primary" data-action="mp-vote-replay" data-i18n="voteReplay">Vote: Play Again</button>
+          <button type="button" class="menu-btn" data-action="mp-vote-leave" data-i18n="voteLeave">Disconnect</button>
+        </div>
       </div>
     </div>
 
     <!-- Touch controls (mobile) — shown only while playing -->
     <div id="touch" class="hidden" aria-hidden="true">
-      <button type="button" id="touch-pause" class="touch-pause" data-i18n="pauseShort" aria-label="Pause">II</button>
-      <div class="stick" id="stick-move"><div class="stick-knob"></div></div>
+      <button type="button" id="touch-pause" class="touch-pause touch-ctrl" data-touch-id="pause" data-i18n="pauseShort" aria-label="Pause">II</button>
+      <div class="stick touch-ctrl" id="stick-move" data-touch-id="stick"><div class="stick-knob"></div></div>
       <div class="touch-btns">
         <div class="touch-btn-row">
-          <button type="button" id="touch-camera" class="touch-btn secondary" data-i18n="cam">CAM</button>
-          <button type="button" id="touch-weapon" class="touch-btn secondary" data-i18n="wpn">WPN</button>
+          <button type="button" id="touch-camera" class="touch-btn secondary touch-ctrl" data-touch-id="camera" data-i18n="cam">CAM</button>
+          <button type="button" id="touch-weapon" class="touch-btn secondary touch-ctrl" data-touch-id="weapon" data-i18n="wpn">WPN</button>
         </div>
         <div class="touch-btn-row">
-          <button type="button" id="touch-brake" class="touch-btn secondary" data-i18n="brk">BRK</button>
-          <button type="button" id="touch-boost" class="touch-btn boost" data-i18n="bst">BST</button>
+          <button type="button" id="touch-brake" class="touch-btn secondary touch-ctrl" data-touch-id="brake" data-i18n="brk">BRK</button>
+          <button type="button" id="touch-boost" class="touch-btn boost touch-ctrl" data-touch-id="boost" data-i18n="bst">BST</button>
         </div>
         <div class="touch-btn-row touch-btn-row-main">
-          <button type="button" id="touch-throttle" class="touch-btn" data-i18n="thr">THR</button>
-          <button type="button" id="touch-fire" class="touch-btn fire" data-i18n="fire">FIRE</button>
+          <button type="button" id="touch-throttle" class="touch-btn touch-ctrl" data-touch-id="throttle" data-i18n="thr">THR</button>
+          <button type="button" id="touch-fire" class="touch-btn fire touch-ctrl" data-touch-id="fire" data-i18n="fire">FIRE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Touch HUD layout editor (Android / touch only) -->
+    <div id="touch-layout-editor" class="touch-layout-editor hidden" aria-hidden="true">
+      <div class="tle-bar">
+        <p class="tle-hint" data-i18n="touchLayoutHint">Drag to move · pinch or slider to resize</p>
+        <div class="tle-row">
+          <span class="tle-sel-label"><span data-i18n="touchLayoutSelected">Selected</span>: <strong id="tle-selected">stick</strong></span>
+          <label class="tle-size-label">
+            <span data-i18n="touchLayoutSize">Size</span>
+            <input type="range" id="tle-size" min="50" max="200" value="100" step="5" />
+          </label>
+        </div>
+        <div class="tle-actions">
+          <button type="button" class="menu-btn" data-action="touch-layout-reset" data-i18n="touchLayoutReset">Reset layout</button>
+          <button type="button" class="menu-btn" data-action="touch-layout-cancel" data-i18n="cancel">Cancel</button>
+          <button type="button" class="menu-btn primary" data-action="touch-layout-done" data-i18n="touchLayoutDone">Save layout</button>
         </div>
       </div>
     </div>
@@ -575,6 +685,7 @@
         <h2 data-i18n="hostSettings">Host match settings</h2>
         <p class="panel-desc" data-i18n="hostSettingsDesc">Configure the sky before you share the invite link.</p>
 
+        <div class="modal-scroll">
         <div class="host-modal-grid">
           <label class="setting-row">
             <span data-i18n="mapSelect">Map</span>
@@ -609,6 +720,16 @@
             <span data-i18n="airportSpawnChance">Runway strip chance %</span>
             <input type="number" id="mp-airport-spawn" min="0" max="100" step="1" value="5" />
           </label>
+          <label class="setting-row">
+            <span data-i18n="matchDuration">Match duration</span>
+            <select id="mp-duration">
+              <option value="1">1 min</option>
+              <option value="2" selected>2 min</option>
+              <option value="3">3 min</option>
+              <option value="5">5 min</option>
+              <option value="10">10 min</option>
+            </select>
+          </label>
         </div>
 
         <p class="setting-note" data-i18n="hostWeapons">Weapons</p>
@@ -636,8 +757,9 @@
           <label class="setting-row check"><span data-i18n="weatherCycle">Dynamic Weather</span><input type="checkbox" id="mp-weather" checked /></label>
           <label class="setting-row check"><span data-i18n="dayNight">Day / Night Cycle</span><input type="checkbox" id="mp-daynight" checked /></label>
         </div>
+        </div>
 
-        <div class="mp-row" style="margin-top:1rem">
+        <div class="mp-row modal-footer-actions">
           <button type="button" class="menu-btn" data-action="mp-host-cancel" data-i18n="cancel">Cancel</button>
           <button type="button" class="menu-btn primary" data-action="mp-host" data-i18n="startHosting">Start Hosting</button>
         </div>
@@ -649,6 +771,7 @@
       <div class="modal-panel">
         <button type="button" class="modal-close" id="auth-close">×</button>
         <h2 data-i18n="login">Login</h2>
+        <div class="modal-scroll">
         <form id="auth-form">
           <div id="auth-register-fields" class="hidden">
             <label><span data-i18n="username">Username</span><input id="auth-username" autocomplete="username" /></label>
@@ -660,6 +783,7 @@
           <button type="submit" class="menu-btn primary" id="auth-submit" data-i18n="login">Login</button>
           <button type="button" class="menu-btn" id="auth-toggle-mode" data-i18n="needAccount">Create account</button>
         </form>
+        </div>
       </div>
     </div>
 
@@ -668,7 +792,8 @@
       <div class="modal-panel modal-wide">
         <button type="button" class="modal-close" id="profile-close">×</button>
         <h2 data-i18n="profile">Profile</h2>
-        <form id="profile-form">
+        <form id="profile-form" class="modal-form-fit">
+          <div class="modal-scroll">
           <label><span data-i18n="displayName">Display name</span><input id="profile-display" /></label>
           <label><span data-i18n="country">Country</span><select id="profile-country"></select></label>
           <label><span data-i18n="gender">Gender</span>
@@ -682,8 +807,21 @@
           <label><span data-i18n="bio">Bio</span><textarea id="profile-bio" rows="2"></textarea></label>
           <p class="setting-note" data-i18n="pickAvatar">Pick a pilot avatar</p>
           <div id="avatar-grid" class="avatar-grid"></div>
-          <button type="submit" class="menu-btn primary" data-i18n="save">Save</button>
+          </div>
+          <div class="modal-footer-actions">
+            <button type="submit" class="menu-btn primary" data-i18n="save">Save</button>
+          </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Invite friend to lobby -->
+    <div id="mp-invite-friend-modal" class="modal hidden">
+      <div class="modal-panel">
+        <button type="button" class="modal-close" id="mp-invite-friend-close">×</button>
+        <h2 data-i18n="inviteFriend">Invite friend</h2>
+        <p class="panel-desc" data-i18n="inviteFriendDesc">Send a lobby invite to a friend’s inbox.</p>
+        <div id="mp-invite-friend-list" class="modal-scroll friends-list"></div>
       </div>
     </div>
 
@@ -698,10 +836,12 @@
           <button type="button" class="sb-tab" data-mode="race" data-i18n="ringRace">Ring Race</button>
           <button type="button" class="sb-tab" data-mode="combat" data-i18n="skyCombat">Combat</button>
         </div>
+        <div class="modal-scroll">
         <table class="scoreboard-table">
           <thead><tr><th>#</th><th data-i18n="pilot">Pilot</th><th></th><th data-i18n="score">Score</th></tr></thead>
           <tbody id="scoreboard-body"></tbody>
         </table>
+        </div>
       </div>
     </div>
   </div>

@@ -96,6 +96,7 @@ async function loadUsers(q = '') {
         <td>${u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
         <td>${u.isBanned ? '<span class="badge banned">banned</span>' : 'active'}</td>
         <td>
+          <button class="btn-sm" data-msg="${u.id}">Msg</button>
           <button class="btn-sm btn-warn" data-kick="${u.id}">Kick</button>
           ${u.isBanned
             ? `<button class="btn-sm btn-ok" data-unban="${u.id}">Unban</button>`
@@ -135,7 +136,53 @@ async function loadSecurity() {
 }
 
 async function loadAll() {
-  await Promise.all([loadStats(), loadOnline(), loadUsers(), loadIpBans(), loadSecurity(), loadAnnouncementAdmin()]);
+  await Promise.all([
+    loadStats(),
+    loadOnline(),
+    loadUsers(),
+    loadIpBans(),
+    loadSecurity(),
+    loadAnnouncementAdmin(),
+    loadInboxRecent(),
+  ]);
+}
+
+async function loadInboxRecent() {
+  try {
+    const { recent } = await api('/admin/inbox/recent');
+    const body = document.getElementById('inbox-recent-body');
+    if (!body) return;
+    body.innerHTML = (recent || [])
+      .map(
+        (r) => `<tr>
+          <td>${new Date(r.createdAt).toLocaleString()}</td>
+          <td>${escapeHtml(r.title)}</td>
+          <td>${r.recipients}</td>
+          <td>${r.allowDelete ? 'yes' : 'locked'}</td>
+        </tr>`
+      )
+      .join('') || `<tr><td colspan="4">No sends yet</td></tr>`;
+  } catch (ex) {
+    console.warn('[admin] inbox recent', ex.message);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function showInboxStatus(msg, ok = true) {
+  const el = document.getElementById('inbox-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle('hidden', !msg);
+  el.classList.toggle('ok', ok);
+  el.classList.toggle('error', !ok);
+  if (msg) setTimeout(() => el.classList.add('hidden'), 4000);
 }
 
 async function loadAnnouncementAdmin() {
@@ -202,7 +249,36 @@ document.querySelectorAll('[data-refresh]').forEach((btn) => {
     if (t === 'users') loadUsers(document.getElementById('user-search').value);
     if (t === 'security') loadSecurity();
     if (t === 'announcement') loadAnnouncementAdmin();
+    if (t === 'messages') loadInboxRecent();
   });
+});
+
+document.querySelectorAll('input[name="inbox-mode"]').forEach((el) => {
+  el.addEventListener('change', () => {
+    const mode = document.querySelector('input[name="inbox-mode"]:checked')?.value;
+    document.getElementById('inbox-user-wrap')?.classList.toggle('hidden', mode === 'broadcast');
+  });
+});
+
+document.getElementById('inbox-msg-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const mode = document.querySelector('input[name="inbox-mode"]:checked')?.value || 'single';
+    const body = {
+      title: document.getElementById('inbox-title').value,
+      body: document.getElementById('inbox-body').value,
+      allowDelete: document.getElementById('inbox-allow-delete').checked,
+    };
+    if (mode === 'broadcast') body.broadcast = true;
+    else body.userId = document.getElementById('inbox-user-id').value.trim();
+    const data = await api('/admin/inbox', { method: 'POST', body });
+    showInboxStatus(`Sent to ${data.sent} inbox(es).`, true);
+    document.getElementById('inbox-title').value = '';
+    document.getElementById('inbox-body').value = '';
+    loadInboxRecent();
+  } catch (ex) {
+    showInboxStatus(ex.message || 'Send failed.', false);
+  }
 });
 
 document.getElementById('user-search')?.addEventListener('input', (e) => {
@@ -250,7 +326,19 @@ document.body.addEventListener('click', async (e) => {
   const unban = e.target.closest('[data-unban]');
   const banIp = e.target.closest('[data-ban-ip]');
   const unbanIp = e.target.closest('[data-unban-ip]');
+  const msg = e.target.closest('[data-msg]');
 
+  if (msg) {
+    document.querySelectorAll('.tab').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.add('hidden'));
+    document.querySelector('.tab[data-tab="messages"]')?.classList.add('active');
+    document.getElementById('tab-messages')?.classList.remove('hidden');
+    const single = document.querySelector('input[name="inbox-mode"][value="single"]');
+    if (single) single.checked = true;
+    document.getElementById('inbox-user-wrap')?.classList.remove('hidden');
+    document.getElementById('inbox-user-id').value = msg.dataset.msg;
+    document.getElementById('inbox-title')?.focus();
+  }
   if (kick) {
     await api(`/admin/users/${kick.dataset.kick}/kick`, { method: 'POST' });
     loadOnline();

@@ -12,6 +12,11 @@ import {
 import { config } from '../config.js';
 import { COUNTRIES, PROFILE_AVATARS } from '../config.js';
 import { getAnnouncement, upsertAnnouncement } from '../models/announcement.js';
+import {
+  createInboxMessage,
+  broadcastAdminMessage,
+  listRecentAdminSends,
+} from '../models/inbox.js';
 
 const router = Router();
 
@@ -267,6 +272,71 @@ router.get('/sessions', async (req, res, next) => {
     sql += ` ORDER BY created_at DESC LIMIT 100`;
     const { rows } = await query(sql, params);
     res.json({ sessions: rows });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/inbox', async (req, res, next) => {
+  try {
+    const { userId, broadcast, title, body, allowDelete } = req.body || {};
+    const t = String(title || '').trim();
+    if (!t) {
+      return res.status(400).json({ error: 'validation', message: 'Title required.' });
+    }
+    const allow = allowDelete !== false && allowDelete !== 'false';
+
+    if (broadcast) {
+      const sent = await broadcastAdminMessage({
+        title: t,
+        body: body || '',
+        allowDelete: allow,
+        fromUserId: req.auth.userId,
+      });
+      await logSecurityEvent('admin_inbox_broadcast', {
+        userId: req.auth.userId,
+        ip: getClientIp(req),
+        details: { title: t, sent, allowDelete: allow },
+      });
+      return res.json({ ok: true, sent });
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        error: 'validation',
+        message: 'userId required (or set broadcast: true).',
+      });
+    }
+    const target = await findUserById(userId);
+    if (!target) {
+      return res.status(404).json({ error: 'not_found', message: 'User not found.' });
+    }
+    const message = await createInboxMessage({
+      userId,
+      kind: 'admin',
+      title: t,
+      body: body || '',
+      fromUserId: req.auth.userId,
+      fromLabel: 'Admin',
+      allowDelete: allow,
+      payload: { broadcast: false },
+    });
+    await logSecurityEvent('admin_inbox_send', {
+      userId: req.auth.userId,
+      targetUserId: userId,
+      ip: getClientIp(req),
+      details: { title: t, allowDelete: allow },
+    });
+    res.json({ ok: true, sent: 1, message });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/inbox/recent', async (req, res, next) => {
+  try {
+    const recent = await listRecentAdminSends(req.query.limit);
+    res.json({ recent });
   } catch (e) {
     next(e);
   }

@@ -1,5 +1,5 @@
 /**
- * Multiplayer hub — lobby config, ready handshake, damage sync.
+ * Multiplayer hub — lobby config, ready handshake, damage sync, match lifecycle.
  * Wraps Matchmaking so host/guest start together on the same worldSeed.
  */
 export class MpHub {
@@ -33,6 +33,27 @@ export class MpHub {
   /** Host tells everyone to leave lobby and begin the match. */
   sendStart() {
     this.match.sendEvent({ type: 'start' });
+  }
+
+  /** Host starts a rematch from results (keeps peer link). */
+  sendRematch(config) {
+    this.setConfig(config);
+    this.match.sendEvent({ type: 'rematch', config: this.config });
+  }
+
+  /** Host (or timer) ends the match and shows results on both sides. */
+  sendMatchEnd(payload = {}) {
+    this.match.sendEvent({
+      type: 'match-end',
+      reason: payload.reason || 'host',
+      kills: payload.kills ?? 0,
+      deaths: payload.deaths ?? 0,
+    });
+  }
+
+  /** Results-screen vote: 'replay' | 'leave' */
+  sendVote(choice) {
+    this.match.sendEvent({ type: 'vote', choice });
   }
 
   onBothReady(cb) {

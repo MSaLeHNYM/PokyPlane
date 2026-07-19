@@ -15,6 +15,8 @@ import presenceRoutes from './routes/presence.js';
 import adminRoutes from './routes/admin.js';
 import announcementRoutes from './routes/announcement.js';
 import mpRoutes from './routes/mp.js';
+import friendsRoutes from './routes/friends.js';
+import inboxRoutes from './routes/inbox.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -49,6 +51,8 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/scores', scoresRoutes);
 app.use('/api/presence', presenceRoutes);
 app.use('/api/announcement', announcementRoutes);
+app.use('/api/friends', friendsRoutes);
+app.use('/api/inbox', inboxRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/mp', mpRoutes);
 

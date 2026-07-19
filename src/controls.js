@@ -156,6 +156,7 @@ export class Input {
     stick.addEventListener(
       'touchstart',
       (e) => {
+        if (document.body.classList.contains('touch-layout-editing')) return;
         e.preventDefault();
         const t = e.changedTouches[0];
         setStick(t.clientX, t.clientY);
@@ -165,6 +166,7 @@ export class Input {
     stick.addEventListener(
       'touchmove',
       (e) => {
+        if (document.body.classList.contains('touch-layout-editing')) return;
         e.preventDefault();
         const t = e.changedTouches[0];
         setStick(t.clientX, t.clientY);
@@ -177,6 +179,7 @@ export class Input {
     const hold = (el, prop) => {
       if (!el) return;
       const down = (e) => {
+        if (document.body.classList.contains('touch-layout-editing')) return;
         e.preventDefault();
         this.touch[prop] = true;
       };

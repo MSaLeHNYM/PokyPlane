@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { cloneKeyBindings, DEFAULT_KEY_BINDINGS, normalizeKeyBindings } from './keybindings.js';
 import { getQualityTier, normalizeQuality } from './quality.js';
+import { normalizeTouchLayout } from './touchLayout.js';
 
 const STORAGE_KEY = 'pokyplane_settings_v2';
 
@@ -41,6 +42,8 @@ export const DEFAULT_SETTINGS = {
   fuelLimit: false,
   airportSpawnChance: 5,
   keyBindings: cloneKeyBindings(DEFAULT_KEY_BINDINGS),
+  /** null = CSS defaults; object = per-control {x,y,size} for touch HUD */
+  touchLayout: null,
   // Announcement (host/editor can edit for local banner)
   announcement: {
     en: 'Welcome pilots! Host a match and share the link — fly together.',
@@ -92,6 +95,7 @@ export function loadSettings() {
       pixelRatio: clampSetting(parsed.pixelRatio, 1, 2, DEFAULT_SETTINGS.pixelRatio),
       shadows: !!parsed.shadows,
       keyBindings: migrateKeyBindings(parsed.keyBindings),
+      touchLayout: normalizeTouchLayout(parsed.touchLayout),
       announcement: { ...DEFAULT_SETTINGS.announcement, ...(parsed.announcement || {}) },
     };
   } catch {

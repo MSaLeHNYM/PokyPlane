@@ -6,12 +6,15 @@
 import Peer from 'peerjs';
 
 const SYNC_HZ = 20;
-const JOIN_RETRIES = 10;
-const JOIN_RETRY_MS = 700;
+const JOIN_RETRIES = 12;
+const JOIN_RETRY_MS = 650;
+const JOIN_ATTEMPT_MS = 5000;
+const PEER_OPEN_MS = 15000;
 const HEARTBEAT_MS = 3000;
+const HOST_REREGISTER_MS = 900;
 
 /** Prefer cloud; set VITE_PEER_LOCAL=1 or ?peerLocal=1 to use same-origin /peerjs. */
-function useLocalPeerServer() {
+export function useLocalPeerServer() {
   try {
     if (import.meta.env?.VITE_PEER_LOCAL === '1') return true;
     if (typeof location !== 'undefined') {
@@ -27,10 +30,12 @@ const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
+  // Free public TURN — may be overloaded; TCP helps restricted networks
   {
     urls: [
       'turn:openrelay.metered.ca:80',
       'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443',
       'turn:openrelay.metered.ca:443?transport=tcp',
     ],
     username: 'openrelayproject',
@@ -56,7 +61,6 @@ function peerOptions() {
   };
 
   if (!useLocalPeerServer()) {
-    // PeerJS cloud — shared realm for all clients
     return {
       ...base,
       host: '0.peerjs.com',
@@ -88,6 +92,15 @@ function wait(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function safeCloseConn(conn) {
+  if (!conn) return;
+  try {
+    conn.close();
+  } catch {
+    /* */
+  }
+}
+
 async function postHeartbeat(roomId) {
   if (!roomId || typeof fetch !== 'function') return;
   try {
@@ -102,7 +115,7 @@ async function postHeartbeat(roomId) {
   }
 }
 
-async function waitForRoomAlive(roomId, attempts = 12) {
+async function waitForRoomAlive(roomId, attempts = 8) {
   for (let i = 0; i < attempts; i++) {
     try {
       const res = await fetch(`/api/mp/room/${encodeURIComponent(roomId)}`, {
@@ -115,9 +128,107 @@ async function waitForRoomAlive(roomId, attempts = 12) {
     } catch {
       /* */
     }
-    await wait(500);
+    await wait(400);
   }
   return false;
+}
+
+/**
+ * Wait until PeerJS signaling is open, with a hard timeout.
+ * @param {import('peerjs').Peer} peer
+ * @param {number} ms
+ */
+function waitForPeerOpen(peer, ms = PEER_OPEN_MS) {
+  return new Promise((resolve, reject) => {
+    if (peer.destroyed) {
+      reject(new Error('peer_destroyed'));
+      return;
+    }
+    if (peer.open) {
+      resolve(peer.id);
+      return;
+    }
+
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(Object.assign(new Error('peer_open_timeout'), { type: 'peer_open_timeout' }));
+    }, ms);
+
+    const onOpen = (id) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(id);
+    };
+    const onError = (err) => {
+      // unavailable-id / network during open — surface to caller
+      if (settled) return;
+      if (err?.type === 'peer-unavailable') return;
+      if (err?.type === 'network' || err?.type === 'disconnected') return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      peer.off('open', onOpen);
+      peer.off('error', onError);
+    };
+
+    peer.on('open', onOpen);
+    peer.on('error', onError);
+  });
+}
+
+/**
+ * Open a DataConnection with timeout; always closes the conn on failure
+ * so orphaned ICE attempts cannot steal the host's single slot.
+ */
+function openDataConnection(peer, hostId, ms = JOIN_ATTEMPT_MS) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const conn = peer.connect(hostId, { reliable: true });
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      try {
+        conn.off('open', onOpen);
+        conn.off('error', onErr);
+        peer.off('error', onPeerErr);
+      } catch {
+        /* */
+      }
+    };
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      safeCloseConn(conn);
+      reject(err instanceof Error ? err : new Error(String(err?.message || err)));
+    };
+
+    const ok = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(conn);
+    };
+
+    const timer = setTimeout(() => fail(new Error('connect_timeout')), ms);
+    const onOpen = () => ok();
+    const onErr = (e) => fail(e);
+    const onPeerErr = (err) => {
+      if (err?.type === 'peer-unavailable') fail(err);
+    };
+
+    conn.on('open', onOpen);
+    conn.on('error', onErr);
+    peer.on('error', onPeerErr);
+  });
 }
 
 export class Matchmaking {
@@ -135,15 +246,19 @@ export class Matchmaking {
     this._destroyed = false;
     this._heartbeatTimer = null;
     this._reconnectTimer = null;
+    this._guestRejoinTimer = null;
     this._onVis = null;
     this._kicking = false;
+    this._joinGeneration = 0;
   }
 
   get inviteUrl() {
     if (!this.roomId) return '';
     const url = new URL(window.location.href);
     url.searchParams.set('room', this.roomId);
-    url.searchParams.delete('peerLocal');
+    // Keep peerLocal so guest uses the same broker as host
+    if (useLocalPeerServer()) url.searchParams.set('peerLocal', '1');
+    else url.searchParams.delete('peerLocal');
     return url.toString();
   }
 
@@ -174,8 +289,15 @@ export class Matchmaking {
     this._heartbeatTimer = setInterval(beat, HEARTBEAT_MS);
   }
 
-  _wireConn(conn) {
+  _replaceConn(conn) {
+    if (this.conn && this.conn !== conn) {
+      safeCloseConn(this.conn);
+    }
     this.conn = conn;
+  }
+
+  _wireConn(conn) {
+    this._replaceConn(conn);
     conn.on('open', () => {
       if (this._destroyed) return;
       this.status = 'connected';
@@ -193,34 +315,38 @@ export class Matchmaking {
     });
     conn.on('close', () => {
       if (this._destroyed) return;
-      this.status = this.role === 'host' ? 'hosting' : 'idle';
-      this.conn = null;
+      if (this.conn === conn) this.conn = null;
       this._remoteState = null;
+      this.status = this.role === 'host' ? 'hosting' : 'idle';
       this.onEvent?.({ type: 'peer-left' });
       this._emitStatus();
+      if (this.role === 'guest' && !this._kicking) {
+        this._scheduleGuestRejoin();
+      }
     });
     conn.on('error', (err) => {
       console.warn('[matchmaking] conn', err);
       if (this._destroyed) return;
-      this.status = 'error';
-      this._emitStatus();
+      // Soft error — do not flip to error if channel still open
+      if (!conn.open) {
+        this.status = this.role === 'host' ? 'hosting' : 'error';
+        this._emitStatus();
+      }
     });
   }
 
-  _bindPeerLifecycle(peer, { onOpen, onFail }) {
-    peer.on('open', (id) => {
-      onOpen?.(id);
-    });
-
+  _bindHostPeer(peer) {
     peer.on('connection', (conn) => {
       if (this.role !== 'host') {
-        conn.close();
+        safeCloseConn(conn);
         return;
       }
+      // Already have a live guest
       if (this.conn?.open) {
-        conn.close();
+        safeCloseConn(conn);
         return;
       }
+      // Replace stale half-open connection so a late orphan cannot block forever
       this._wireConn(conn);
     });
 
@@ -231,7 +357,6 @@ export class Matchmaking {
         peer.reconnect();
       } catch (e) {
         console.warn(e);
-        // Prefer reconnect only; never tear down a live data channel.
         if (!this.conn?.open) this._scheduleHostReregister();
       }
     });
@@ -249,57 +374,96 @@ export class Matchmaking {
         console.warn('[matchmaking] peer network', err);
         return;
       }
-      onFail?.(err);
+      if (err?.type === 'unavailable-id' && this.role === 'host') {
+        console.warn('[matchmaking] host id unavailable — will reregister with new id');
+        this._scheduleHostReregister({ forceNewId: true });
+      }
     });
   }
 
-  _scheduleHostReregister() {
+  _scheduleHostReregister(opts = {}) {
     if (this._destroyed || this.role !== 'host' || !this.roomId) return;
-    // Live peer data channel — do not destroy the Peer (would kill the match).
     if (this.conn?.open) return;
     if (this._reconnectTimer) return;
+    const forceNewId = !!opts.forceNewId;
     this._reconnectTimer = setTimeout(async () => {
       this._reconnectTimer = null;
       if (this._destroyed || this.role !== 'host' || !this.roomId) return;
       if (this.conn?.open) return;
-      const keepId = this.roomId;
+
+      const keepId = forceNewId ? shortRoomId() : this.roomId;
       try {
         this.peer?.destroy();
       } catch {
         /* */
       }
-      this.peer = this._createPeer(keepId);
-      this._bindPeerLifecycle(this.peer, {
-        onOpen: (id) => {
-          this.roomId = id;
-          this.status = this.conn?.open ? 'connected' : 'hosting';
-          this._startHeartbeat();
+
+      try {
+        this.peer = this._createPeer(keepId);
+        this._bindHostPeer(this.peer);
+        const openId = await waitForPeerOpen(this.peer, PEER_OPEN_MS);
+        this.roomId = openId;
+        this.status = this.conn?.open ? 'connected' : 'hosting';
+        this._startHeartbeat();
+        this._emitStatus();
+      } catch (err) {
+        console.warn('[matchmaking] reregister failed', err);
+        if (!forceNewId) {
+          // Same id stuck — try a fresh id so hosting can recover
+          this._scheduleHostReregister({ forceNewId: true });
+        } else {
+          this.status = 'error';
           this._emitStatus();
-        },
-        onFail: (err) => console.warn('[matchmaking] reregister failed', err),
-      });
-    }, 800);
+        }
+      }
+    }, HOST_REREGISTER_MS);
+  }
+
+  _scheduleGuestRejoin() {
+    if (this._destroyed || this.role !== 'guest' || !this.roomId) return;
+    if (this._guestRejoinTimer) return;
+    if (this.status === 'connecting') return;
+    this._guestRejoinTimer = setTimeout(async () => {
+      this._guestRejoinTimer = null;
+      if (this._destroyed || this.role !== 'guest' || !this.roomId) return;
+      if (this.conn?.open) return;
+      const room = this.roomId;
+      console.warn('[matchmaking] guest attempting rejoin', room);
+      try {
+        this.status = 'connecting';
+        this._emitStatus();
+        await this._connectAsGuest(room, { isRejoin: true });
+      } catch (e) {
+        console.warn('[matchmaking] guest rejoin failed', e);
+        this.status = 'idle';
+        this._emitStatus();
+      }
+    }, 1200);
   }
 
   _watchVisibility() {
     if (typeof document === 'undefined' || this._onVis) return;
     this._onVis = () => {
       if (document.visibilityState !== 'visible') return;
-      if (this._destroyed || this.role !== 'host') return;
-      if (this.conn?.open) {
-        this._startHeartbeat();
-        return;
-      }
-      if (this.peer && !this.peer.open && !this.peer.destroyed) {
-        try {
-          this.peer.reconnect();
-        } catch {
+      if (this._destroyed) return;
+      if (this.role === 'host') {
+        if (this.conn?.open) {
+          this._startHeartbeat();
+          return;
+        }
+        if (this.peer && !this.peer.open && !this.peer.destroyed) {
+          try {
+            this.peer.reconnect();
+          } catch {
+            this._scheduleHostReregister();
+          }
+        } else if (!this.peer || this.peer.destroyed) {
           this._scheduleHostReregister();
         }
-      } else if (!this.peer || this.peer.destroyed) {
-        this._scheduleHostReregister();
+        this._startHeartbeat();
+      } else if (this.role === 'guest' && !this.conn?.open && this.roomId) {
+        this._scheduleGuestRejoin();
       }
-      this._startHeartbeat();
     };
     document.addEventListener('visibilitychange', this._onVis);
   }
@@ -317,52 +481,90 @@ export class Matchmaking {
     this._emitStatus();
     this._watchVisibility();
 
-    const tryId = shortRoomId();
+    let tryId = shortRoomId();
+    let lastErr = null;
 
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const fail = (err) => {
-        if (settled) return;
-        settled = true;
-        this.status = 'error';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (this._destroyed) throw new Error('destroyed');
+      try {
+        this.peer = this._createPeer(tryId);
+        this._bindHostPeer(this.peer);
+        const openId = await waitForPeerOpen(this.peer, PEER_OPEN_MS);
+        this.roomId = openId;
+        this._startHeartbeat();
         this._emitStatus();
-        reject(err);
-      };
+        return { roomId: openId, inviteUrl: this.inviteUrl };
+      } catch (err) {
+        lastErr = err;
+        try {
+          this.peer?.destroy();
+        } catch {
+          /* */
+        }
+        this.peer = null;
+        // unavailable-id or timeout → new short id
+        tryId = shortRoomId();
+        await wait(300);
+      }
+    }
 
-      const startWithId = (id) => {
-        this.peer = this._createPeer(id);
-        this._bindPeerLifecycle(this.peer, {
-          onOpen: (openId) => {
-            if (settled) {
-              this.roomId = openId;
-              this._startHeartbeat();
-              this._emitStatus();
-              return;
-            }
-            settled = true;
-            this.roomId = openId;
-            this._startHeartbeat();
-            this._emitStatus();
-            resolve({ roomId: openId, inviteUrl: this.inviteUrl });
-          },
-          onFail: (err) => {
-            if (err?.type === 'unavailable-id' && !settled) {
-              try {
-                this.peer.destroy();
-              } catch {
-                /* */
-              }
-              // Retry once with a fresh short id
-              startWithId(shortRoomId());
-              return;
-            }
-            fail(err);
-          },
-        });
-      };
+    this.status = 'error';
+    this._emitStatus();
+    throw lastErr || new Error('host_failed');
+  }
 
-      startWithId(tryId);
-    });
+  /**
+   * Shared guest connect path (fresh join + rejoin).
+   * @param {string} clean
+   * @param {{ isRejoin?: boolean }} [opts]
+   */
+  async _connectAsGuest(clean, opts = {}) {
+    const gen = ++this._joinGeneration;
+
+    if (!opts.isRejoin) {
+      await waitForRoomAlive(clean, 8);
+    }
+
+    if (!this.peer || this.peer.destroyed || !this.peer.open) {
+      try {
+        this.peer?.destroy();
+      } catch {
+        /* */
+      }
+      this.peer = this._createPeer();
+      await waitForPeerOpen(this.peer, PEER_OPEN_MS);
+    }
+
+    let lastErr = null;
+    for (let attempt = 0; attempt < JOIN_RETRIES; attempt++) {
+      if (this._destroyed || gen !== this._joinGeneration) {
+        throw new Error('join_aborted');
+      }
+      if (attempt > 0) await waitForRoomAlive(clean, 3);
+
+      try {
+        const conn = await openDataConnection(this.peer, clean, JOIN_ATTEMPT_MS);
+        if (this._destroyed || gen !== this._joinGeneration) {
+          safeCloseConn(conn);
+          throw new Error('join_aborted');
+        }
+        this._wireConn(conn);
+        if (conn.open) {
+          this.status = 'connected';
+          this._emitStatus();
+          this.onEvent?.({ type: 'peer-joined' });
+        }
+        return { roomId: clean };
+      } catch (e) {
+        lastErr = e;
+        await wait(JOIN_RETRY_MS * (1 + attempt * 0.2));
+      }
+    }
+
+    throw (
+      lastErr ||
+      Object.assign(new Error('peer_unavailable'), { type: 'peer-unavailable' })
+    );
   }
 
   async join(roomId) {
@@ -379,80 +581,22 @@ export class Matchmaking {
     this.roomId = clean;
     this.status = 'connecting';
     this._emitStatus();
+    this._watchVisibility();
 
-    // Wait until host has heartbeated (best-effort; cloud may still work without it)
-    await waitForRoomAlive(clean, 8);
-
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const fail = (err) => {
-        if (settled || this._destroyed) return;
-        settled = true;
-        this.status = 'error';
-        this._emitStatus();
-        reject(err instanceof Error ? err : new Error(String(err?.message || err)));
-      };
-
-      this.peer = this._createPeer();
-
-      let rejectAttempt = null;
-      this.peer.on('error', (err) => {
-        if (err?.type === 'peer-unavailable') {
-          rejectAttempt?.(err);
-          return;
-        }
-        if (err?.type === 'network') return;
-        fail(err);
-      });
-
-      this.peer.on('open', async () => {
-        let lastErr = null;
-        for (let attempt = 0; attempt < JOIN_RETRIES; attempt++) {
-          if (this._destroyed || settled) return;
-          if (attempt > 0) await waitForRoomAlive(clean, 4);
-
-          try {
-            const conn = this.peer.connect(clean, {
-              reliable: true,
-            });
-            await new Promise((res, rej) => {
-              const t = setTimeout(() => rej(new Error('connect_timeout')), 4500);
-              rejectAttempt = (e) => {
-                clearTimeout(t);
-                rej(e);
-              };
-              conn.on('open', () => {
-                clearTimeout(t);
-                rejectAttempt = null;
-                res();
-              });
-              conn.on('error', (e) => {
-                clearTimeout(t);
-                rejectAttempt = null;
-                rej(e);
-              });
-            });
-            if (settled) return;
-            settled = true;
-            this._wireConn(conn);
-            if (conn.open) {
-              this.status = 'connected';
-              this._emitStatus();
-              this.onEvent?.({ type: 'peer-joined' });
-            }
-            resolve({ roomId: clean });
-            return;
-          } catch (e) {
-            lastErr = e;
-            await wait(JOIN_RETRY_MS * (1 + attempt * 0.25));
-          }
-        }
-        fail(
-          lastErr ||
-            Object.assign(new Error('peer_unavailable'), { type: 'peer-unavailable' })
-        );
-      });
-    });
+    try {
+      return await this._connectAsGuest(clean);
+    } catch (err) {
+      this.status = 'error';
+      this._emitStatus();
+      // Tear down so a retry starts clean
+      try {
+        this.peer?.destroy();
+      } catch {
+        /* */
+      }
+      this.peer = null;
+      throw err instanceof Error ? err : new Error(String(err?.message || err));
+    }
   }
 
   /** Send local flight snapshot (throttled). */
@@ -486,13 +630,10 @@ export class Matchmaking {
     } catch {
       /* */
     }
-    try {
-      this.conn?.close();
-    } catch {
-      /* */
-    }
+    safeCloseConn(this.conn);
     this.conn = null;
     this.status = 'hosting';
+    this._kicking = false;
     this._emitStatus();
   }
 
@@ -501,25 +642,26 @@ export class Matchmaking {
   }
 
   get isConnected() {
-    return this.status === 'connected' && this.conn?.open;
+    return this.status === 'connected' && !!this.conn?.open;
   }
 
   async destroy() {
     this._destroyed = true;
+    this._joinGeneration += 1;
     this._clearHeartbeat();
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
+    if (this._guestRejoinTimer) {
+      clearTimeout(this._guestRejoinTimer);
+      this._guestRejoinTimer = null;
+    }
     if (this._onVis && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this._onVis);
       this._onVis = null;
     }
-    try {
-      this.conn?.close();
-    } catch {
-      /* */
-    }
+    safeCloseConn(this.conn);
     try {
       this.peer?.destroy();
     } catch {
@@ -531,6 +673,7 @@ export class Matchmaking {
     this.roomId = null;
     this.status = 'idle';
     this._remoteState = null;
+    this._kicking = false;
     this._emitStatus();
   }
 }
@@ -545,5 +688,6 @@ export function clearRoomFromUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete('room');
   url.searchParams.delete('join');
+  // Keep peerLocal if present — guest may still need it for a re-host in same tab
   window.history.replaceState({}, '', url.pathname + url.search + url.hash);
 }

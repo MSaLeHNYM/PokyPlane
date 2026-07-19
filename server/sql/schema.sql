@@ -101,3 +101,58 @@ CREATE TABLE IF NOT EXISTS announcements (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_by UUID REFERENCES users(id) ON DELETE SET NULL
 );
+
+-- Friends + unified inbox
+CREATE TABLE IF NOT EXISTS friend_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  to_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status VARCHAR(16) NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'accepted', 'denied', 'canceled')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  responded_at TIMESTAMPTZ,
+  CHECK (from_user_id <> to_user_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_friend_requests_pending_pair
+  ON friend_requests (from_user_id, to_user_id)
+  WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_friend_requests_to_pending
+  ON friend_requests (to_user_id, created_at DESC)
+  WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_friend_requests_from
+  ON friend_requests (from_user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS friendships (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  friend_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, friend_id),
+  CHECK (user_id <> friend_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_friendships_friend ON friendships(friend_id);
+
+CREATE TABLE IF NOT EXISTS inbox_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind VARCHAR(24) NOT NULL
+    CHECK (kind IN ('friend_request', 'admin', 'lobby_invite')),
+  title TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  payload JSONB NOT NULL DEFAULT '{}',
+  from_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  from_label VARCHAR(80),
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  allow_delete BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_user_created
+  ON inbox_messages (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_user_unread
+  ON inbox_messages (user_id, is_read)
+  WHERE is_read = FALSE;

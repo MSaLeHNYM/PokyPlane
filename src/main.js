@@ -26,8 +26,14 @@ import { MpHub } from './mpHub.js';
 import { WeaponSystem, WEAPON_ORDER, WEAPON_DEFS, DEFAULT_WEAPON_FLAGS, isExplosiveWeapon } from './weapons.js';
 import { FuelPickups } from './fuel.js';
 import { setupAuthUI, isLoggedIn, getUser, openAuthModal } from './authUi.js';
-import { fetchAnnouncement } from './api.js';
-import { submitScore } from './api.js';
+import { onAuthChanged, fetchAnnouncement, submitScore, updateProfile } from './api.js';
+import {
+  setupInboxUI,
+  openInboxScreen,
+  closeInboxScreen,
+  setInboxJoinLobbyHandler,
+  setInviteRoomContext,
+} from './inboxUi.js';
 import { makeNameTag, setNameTagText, disposeNameTag } from './nameTag.js';
 import { startPresenceLoop, stopPresenceLoop } from './presence.js';
 import { MAPS, getMap, getMapWind, mapLabel } from './maps.js';
@@ -40,7 +46,31 @@ import {
   normalizeKeyBindings,
 } from './keybindings.js';
 import { TargetLockSystem, buildThreatMarkers, findAimAssistTarget } from './targeting.js';
-import { normalizeQuality } from './quality.js';
+import { normalizeQuality, QUALITY_LEVELS } from './quality.js';
+import {
+  registerServiceWorker,
+  bindInstallPrompt,
+  applyPwaGate,
+  isPwaGateActive,
+  forceLandscape,
+  promptPwaInstall,
+  canPlayGame,
+  isTouchMobile,
+} from './pwaGate.js';
+import {
+  applyTouchLayout,
+  startTouchLayoutEditor,
+  stopTouchLayoutEditor,
+  resetTouchLayoutDraft,
+  isTouchLayoutEditing,
+} from './touchLayout.js';
+import {
+  buildCloudSettingsPayload,
+  mergeCloudSettingsIntoLocal,
+  snapshotGraphicsSettings,
+  applyGraphicsProfile,
+  SYNCED_SETTING_KEYS,
+} from './settingsCloud.js';
 
 // ----- Settings & audio -----
 let settings = loadSettings();
@@ -83,6 +113,7 @@ let mpLobby = {
   mode: 'dogfight',
   difficulty: 'normal',
   maxPlayers: 2,
+  matchDurationMin: 2,
   weapons: true,
   weaponFlags: { ...DEFAULT_WEAPON_FLAGS },
   fuelLimit: false,
@@ -92,6 +123,17 @@ let mpLobby = {
   enabledPlanes: PLANE_TYPES.map(() => true),
   spawnAirportId: 'main',
 };
+
+const MP_DURATION_OPTIONS = [1, 2, 3, 5, 10];
+
+function clampMatchDurationMin(v) {
+  const n = Math.round(Number(v));
+  return MP_DURATION_OPTIONS.includes(n) ? n : 2;
+}
+
+function isMpDogfight() {
+  return gameMode === 'multiplayer' && (mpLobby.mode || 'dogfight') !== 'freefly';
+}
 
 function syncWorldSeedUi(seed = sessionWorldSeed) {
   const el = document.getElementById('menu-world-seed');
@@ -168,8 +210,22 @@ let remoteInterp = {
 };
 let localMpName = 'Pilot';
 let mpPeerName = '';
+let mpPeerDevice = ''; // 'pc' | 'mobile'
 let mpGuestConnected = false;
 let mpEditingSettings = false;
+/** Room to join after login (invite link / join blocked by auth). */
+let pendingMpRoom = null;
+let mpKills = 0;
+let mpDeaths = 0;
+let mpPeerKills = 0;
+let mpMatchTimeLeft = null;
+let mpMatchEnded = false;
+let mpLocalVote = null; // 'replay' | 'leave'
+let mpRemoteVote = null;
+let mpDying = false;
+let mpRespawnTimer = null;
+/** Ignore spam `died` events from peer until this time (ms, performance.now). */
+let mpPeerDiedIgnoreUntil = 0;
 const mpChatHistory = [];
 const MP_CHAT_MAX = 40;
 
@@ -214,6 +270,7 @@ const optionsEl = document.getElementById('options');
 const pauseEl = document.getElementById('pause');
 const resultsEl = document.getElementById('results');
 const mpEl = document.getElementById('multiplayer');
+const inboxEl = document.getElementById('inbox');
 const fpsEl = document.getElementById('fps-counter');
 const announceEl = document.getElementById('announce-banner');
 const announceText = document.getElementById('announce-text');
@@ -225,6 +282,11 @@ function syncWorldVisibility() {
 }
 
 function syncTouchUi() {
+  if (isTouchLayoutEditing()) {
+    input.setTouchVisible(true);
+    syncOrientationLock();
+    return;
+  }
   input.setTouchVisible(state === 'playing');
   syncOrientationLock();
 }
@@ -233,53 +295,23 @@ function isPortrait() {
   return window.matchMedia('(orientation: portrait)').matches;
 }
 
-async function tryLockLandscape() {
-  try {
-    const orient = screen.orientation;
-    if (orient?.lock) {
-      await orient.lock('landscape');
-    }
-  } catch {
-    // Browsers often require fullscreen; overlay still guides the user
-  }
-}
-
-async function tryEnterFullscreen() {
-  if (!input.isTouchUi) return;
-  const root = document.getElementById('app') || document.documentElement;
-  const active =
-    document.fullscreenElement ||
-    document.webkitFullscreenElement ||
-    document.msFullscreenElement;
-  if (active) return;
-  try {
-    if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
-    else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
-    else if (root.msRequestFullscreen) root.msRequestFullscreen();
-  } catch {
-    /* user gesture / policy may block */
-  }
-}
-
 function syncOrientationLock() {
-  if (!input.isTouchUi) return;
-
-  // Main menu: portrait OK. Everything else: force landscape.
-  const onMainMenu = state === 'menu' && !menuEl?.classList.contains('hidden');
-  const needsLandscape = !onMainMenu;
-
-  document.body.classList.toggle('force-landscape', needsLandscape);
-  document.body.classList.toggle('menu-portrait-ok', onMainMenu);
-
-  const locked = needsLandscape && isPortrait();
-  document.body.classList.toggle('portrait-locked', locked);
-  const el = document.getElementById('rotate-lock');
-  el?.classList.toggle('hidden', !locked);
-
-  tryEnterFullscreen();
-  if (needsLandscape && !locked) {
-    tryLockLandscape();
+  if (!input.isTouchUi || isPwaGateActive()) {
+    document.body.classList.remove('force-landscape', 'portrait-locked', 'menu-portrait-ok');
+    document.getElementById('rotate-lock')?.classList.add('hidden');
+    return;
   }
+
+  // Entire game (including menu) is landscape-only on mobile / PWA.
+  document.body.classList.add('force-landscape');
+  document.body.classList.remove('menu-portrait-ok');
+
+  const portrait = isPortrait();
+  document.body.classList.toggle('portrait-locked', portrait);
+  // Never prompt to rotate — CSS + Orientation API handle it.
+  document.getElementById('rotate-lock')?.classList.add('hidden');
+
+  forceLandscape();
 }
 
 function syncNavBack() {
@@ -289,19 +321,35 @@ function syncNavBack() {
   const onMp = !mpEl?.classList.contains('hidden');
   const onPause = !pauseEl?.classList.contains('hidden');
   const onResults = !resultsEl?.classList.contains('hidden');
+  const onInbox = !inboxEl?.classList.contains('hidden');
   const hostModal = !document.getElementById('mp-host-modal')?.classList.contains('hidden');
+  const inviteModal = !document.getElementById('mp-invite-friend-modal')?.classList.contains('hidden');
   const visible =
     input.isTouchUi &&
-    (onOptions || onMp || onPause || onResults || hostModal) &&
+    (onOptions || onMp || onPause || onResults || onInbox || hostModal || inviteModal) &&
     state !== 'playing';
   btn.classList.toggle('hidden', !visible);
 }
 
 function navigateBack() {
+  if (isTouchLayoutEditing()) {
+    finishTouchLayoutEditor(false);
+    return;
+  }
+  const inviteModal = document.getElementById('mp-invite-friend-modal');
+  if (inviteModal && !inviteModal.classList.contains('hidden')) {
+    inviteModal.classList.add('hidden');
+    syncNavBack();
+    return;
+  }
   const hostModal = document.getElementById('mp-host-modal');
   if (hostModal && !hostModal.classList.contains('hidden')) {
     closeHostModal();
     syncNavBack();
+    return;
+  }
+  if (!inboxEl?.classList.contains('hidden')) {
+    showScreen('menu');
     return;
   }
   if (!optionsEl?.classList.contains('hidden')) {
@@ -330,17 +378,31 @@ function navigateBack() {
 }
 
 function showScreen(id) {
-  [menuEl, optionsEl, pauseEl, resultsEl, mpEl].forEach((el) => el?.classList.add('hidden'));
+  [menuEl, optionsEl, pauseEl, resultsEl, mpEl, inboxEl].forEach((el) => el?.classList.add('hidden'));
   if (id === 'menu') menuEl?.classList.remove('hidden');
   if (id === 'options') optionsEl?.classList.remove('hidden');
-  if (id === 'pause') pauseEl?.classList.remove('hidden');
+  if (id === 'pause') {
+    pauseEl?.classList.remove('hidden');
+    const endBtn = document.getElementById('mp-end-match-btn');
+    const showEnd =
+      match.role === 'host' &&
+      gameMode === 'multiplayer' &&
+      !mpMatchEnded &&
+      (state === 'paused' || state === 'playing');
+    endBtn?.classList.toggle('hidden', !showEnd);
+  }
   if (id === 'results') resultsEl?.classList.remove('hidden');
   if (id === 'multiplayer') mpEl?.classList.remove('hidden');
+  if (id === 'inbox') {
+    inboxEl?.classList.remove('hidden');
+    openInboxScreen();
+  } else {
+    closeInboxScreen();
+  }
   syncWorldVisibility();
   syncTouchUi();
   syncOrientationLock();
   syncNavBack();
-  tryEnterFullscreen();
 
   // History stack so Android back uses in-app navigation
   if (id && id !== 'none') {
@@ -372,10 +434,12 @@ function updateBanner() {
     fa: settings.announcement?.fa || '',
   };
   const lang = getLang();
-  const text = src[lang] || src.en || src.fa || '';
-  const on = !!src.enabled && !bannerDismissed && !!text.trim();
+  const text = String(src[lang] || src.en || src.fa || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const on = !!src.enabled && !bannerDismissed && !!text;
   announceEl.classList.toggle('hidden', !on);
-  announceText.textContent = text;
+  if (announceText) announceText.textContent = text;
 }
 
 async function loadServerAnnouncement() {
@@ -398,8 +462,8 @@ function buildMenuPlane() {
   const built = createPlane(planeTypeIndex);
   menuPlane = built.group;
   menuParts = built.parts;
-  menuPlane.position.set(0, 2, 0);
-  menuPlane.scale.setScalar(1.2);
+  menuPlane.position.set(0, 1.15, 0);
+  menuPlane.scale.setScalar(1.45);
   scene.add(menuPlane);
 }
 
@@ -453,6 +517,187 @@ function applySettingsEffects() {
   }
   updateBanner();
   syncShadowCasters();
+  applyTouchLayout(settings.touchLayout);
+}
+
+async function persistSyncedSettingsToCloud() {
+  if (!isLoggedIn()) return;
+  const user = getUser();
+  const prev = user?.settings && typeof user.settings === 'object' ? user.settings : {};
+  try {
+    await updateProfile({
+      settings: buildCloudSettingsPayload(settings, prev),
+    });
+  } catch (err) {
+    console.warn('[settings] cloud sync failed', err);
+  }
+}
+
+/** @deprecated alias — touch layout save uses full synced payload */
+const persistTouchLayoutToCloud = persistSyncedSettingsToCloud;
+
+function cloudHasSyncedPrefs(cloud) {
+  if (!cloud || typeof cloud !== 'object') return false;
+  return SYNCED_SETTING_KEYS.some((k) => cloud[k] !== undefined && cloud[k] !== null);
+}
+
+function mergeCloudUserSettings(user) {
+  if (!user) return;
+  const cloud = user.settings;
+
+  if (cloudHasSyncedPrefs(cloud)) {
+    if (mergeCloudSettingsIntoLocal(settings, cloud)) {
+      saveSettings(settings);
+      setLang(settings.language);
+      syncLangButtons();
+      applySettingsEffects();
+      fillSettingsForm();
+    }
+    return;
+  }
+
+  // First time on this account: upload local sound / gameplay / touch layout
+  persistSyncedSettingsToCloud();
+}
+
+let graphicsDetectRunning = false;
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Sample smoothed game loop FPS (main loop fpsValue). Cap must be 0 while sampling. */
+async function sampleLoopFps(durationMs = 1800) {
+  const samples = [];
+  const end = performance.now() + durationMs;
+  // Reset accumulator so first reading is fresh
+  fpsAccum = 0;
+  fpsFrames = 0;
+  while (performance.now() < end) {
+    await sleepMs(520);
+    if (fpsValue > 0) samples.push(fpsValue);
+  }
+  if (!samples.length) return 0;
+  samples.sort((a, b) => a - b);
+  // Use median — more stable than average for short windows
+  return samples[Math.floor(samples.length / 2)];
+}
+
+async function autoDetectBestGraphics() {
+  if (graphicsDetectRunning) return;
+  graphicsDetectRunning = true;
+  hud.toast(t('graphicsDetecting'));
+
+  const backup = snapshotGraphicsSettings(settings);
+  const showFpsWas = settings.showFps;
+  let best = 'low';
+  let bestFps = 0;
+
+  try {
+    // Heavier load than idle menu (terrain in view)
+    ensureWorld(selectedMapId || 'meadow', sessionWorldSeed);
+    const wasVisible = !!world?.group?.visible;
+    if (world?.group) world.group.visible = true;
+
+    settings.showFps = true;
+    fpsEl?.classList.remove('hidden');
+
+    const detectBtns = document.querySelectorAll('[data-action="graphics-autodetect"]');
+    detectBtns.forEach((b) => {
+      b.disabled = true;
+      b.textContent = t('graphicsDetecting');
+    });
+
+    for (const quality of QUALITY_LEVELS) {
+      applyGraphicsProfile(settings, quality);
+      settings.fpsCap = 0; // uncapped so we can see if device can hold 60+
+      applySettingsEffects();
+      await sleepMs(400); // settle GPU/state
+      const fps = await sampleLoopFps(1600);
+      if (fps >= 55) {
+        best = quality;
+        bestFps = fps;
+      } else {
+        // Ascending ladder — stop once we drop under target
+        if (!bestFps) {
+          best = 'low';
+          bestFps = fps;
+        }
+        break;
+      }
+    }
+
+    applyGraphicsProfile(settings, best);
+    settings.fpsCap = 60;
+    settings.showFps = showFpsWas;
+    applySettingsEffects();
+    saveSettings(settings); // graphics are device-local only
+    fillSettingsForm();
+    if (world?.group) world.group.visible = wasVisible || state === 'playing' || state === 'paused';
+    syncWorldVisibility();
+    hud.toast(`${t('graphicsDetectDone')}: ${best.toUpperCase()} (~${Math.round(bestFps)} FPS)`);
+  } catch (err) {
+    console.warn('[graphics] auto-detect failed', err);
+    Object.assign(settings, backup);
+    settings.showFps = showFpsWas;
+    applySettingsEffects();
+    fillSettingsForm();
+    hud.toast(t('graphicsDetectFail'));
+  } finally {
+    graphicsDetectRunning = false;
+    document.querySelectorAll('[data-action="graphics-autodetect"]').forEach((b) => {
+      b.disabled = false;
+      b.setAttribute('data-i18n', 'graphicsAutoDetect');
+      b.textContent = t('graphicsAutoDetect');
+    });
+    applyDomLang();
+  }
+}
+
+let touchLayoutReturnScreen = 'menu';
+
+function openTouchLayoutEditor() {
+  if (!input.isTouchUi) return;
+  touchLayoutReturnScreen = state === 'paused' ? 'pause' : state === 'playing' ? 'none' : 'options';
+  if (state === 'playing') {
+    state = 'paused';
+  }
+  // Hide overlays; show stick/buttons for editing
+  [menuEl, optionsEl, pauseEl, resultsEl, mpEl].forEach((el) => el?.classList.add('hidden'));
+  document.getElementById('mp-host-modal')?.classList.add('hidden');
+  input.setGameActive(false);
+  input.setTouchVisible(true);
+  startTouchLayoutEditor(settings.touchLayout, (draft) => {
+    /* live preview already applied inside editor */
+    void draft;
+  });
+  applyDomLang();
+  syncNavBack();
+}
+
+function finishTouchLayoutEditor(save) {
+  if (!isTouchLayoutEditing()) return;
+  if (save) {
+    settings.touchLayout = stopTouchLayoutEditor({ useCssDefaults: false });
+    saveSettings(settings);
+    applyTouchLayout(settings.touchLayout);
+    persistTouchLayoutToCloud();
+    hud.toast(t('touchLayoutSaved'));
+  } else {
+    stopTouchLayoutEditor({ useCssDefaults: true });
+    applyTouchLayout(settings.touchLayout);
+  }
+  if (touchLayoutReturnScreen === 'none') {
+    state = 'playing';
+    showScreen('none');
+  } else if (touchLayoutReturnScreen === 'pause') {
+    state = 'paused';
+    showScreen('pause');
+  } else if (touchLayoutReturnScreen === 'options') {
+    showScreen('options');
+  } else {
+    showScreen('menu');
+  }
 }
 
 function syncShadowCasters() {
@@ -490,7 +735,7 @@ function spawnRemotePlane(skin = 1, seedPos = null) {
   remotePlane.position.set(p.x, p.y, p.z);
   remoteInterp.pos.set(p.x, p.y, p.z);
   remoteInterp.targetPos.set(p.x, p.y, p.z);
-  remoteNameTag = makeNameTag(mpPeerName || t('mpGuest'));
+  remoteNameTag = makeNameTag(formatMpName(mpPeerName || t('mpGuest'), mpPeerDevice));
   remotePlane.add(remoteNameTag);
   scene.add(remotePlane);
 }
@@ -510,7 +755,7 @@ function clearRemotePlane() {
 
 function refreshRemoteNameTag() {
   if (!remoteNameTag || !mpPeerName) return;
-  setNameTagText(remoteNameTag, mpPeerName);
+  setNameTagText(remoteNameTag, formatMpName(mpPeerName, mpPeerDevice));
 }
 
 function clearModes() {
@@ -528,6 +773,10 @@ function clearModes() {
 }
 
 function startGame(mode, mapOverride = null) {
+  if (!canPlayGame()) {
+    applyPwaGate();
+    return;
+  }
   const mapId = mapOverride || selectedMapId || document.getElementById('menu-map')?.value || 'meadow';
 
   // New random world each solo flight; MP uses lobby seed (host generates once).
@@ -555,6 +804,7 @@ function startGame(mode, mapOverride = null) {
     scene.remove(menuPlane);
     menuPlane = null;
   }
+  scene.background = null;
 
   flight = new FlightModel();
   flight.worldBound = world.worldBound;
@@ -634,8 +884,7 @@ function startGame(mode, mapOverride = null) {
   showScreen('none');
   syncWorldVisibility();
   syncOrientationLock();
-  tryLockLandscape();
-  tryEnterFullscreen();
+  forceLandscape();
   hud.show(true);
   sound.stopAmbient();
   const planeType = getPlaneType(planeTypeIndex);
@@ -693,7 +942,9 @@ function endGame(title, body) {
       ? race.score
       : gameMode === 'combat' && combat
         ? combat.score
-        : Math.floor(flightTime);
+        : gameMode === 'multiplayer'
+          ? mpKills
+          : Math.floor(flightTime);
 
   if (isLoggedIn()) {
     submitScore({
@@ -706,8 +957,194 @@ function endGame(title, body) {
 
   document.getElementById('results-title').textContent = title;
   document.getElementById('results-body').textContent = body;
+  document.getElementById('results-solo-actions')?.classList.remove('hidden');
+  document.getElementById('results-mp-actions')?.classList.add('hidden');
   showScreen('results');
   hud.show(false);
+}
+
+function updateMpVoteUi() {
+  const el = document.getElementById('results-vote-status');
+  if (!el) return;
+  const lines = [];
+  if (mpLocalVote === 'replay') lines.push(t('voteYouReplay'));
+  else if (mpLocalVote === 'leave') lines.push(t('voteYouLeave'));
+  else lines.push(t('voteWaiting'));
+  if (mpRemoteVote === 'replay') lines.push(t('votePeerReplay'));
+  else if (mpRemoteVote === 'leave') lines.push(t('votePeerLeave'));
+  el.textContent = lines.join(' · ');
+}
+
+/** Multiplayer results — keep PeerJS link for rematch votes. */
+function endMpMatch(reason = 'time', opts = {}) {
+  if (mpMatchEnded) return;
+  mpMatchEnded = true;
+  clearMpRespawnTimer();
+  mpDying = false;
+  state = 'results';
+  world?.disableStreaming?.();
+  sound.setStall(false);
+  sound.stopEngine();
+  sound.stopWind();
+  // Keep remote engine drones quiet until rematch
+  sound.clearRemoteEngines();
+
+  if (opts.peerKills != null) mpPeerKills = opts.peerKills;
+
+  const youWin = mpKills > mpPeerKills;
+  const draw = mpKills === mpPeerKills;
+  const title = draw ? t('mpDraw') : youWin ? t('youWin') : t('youLose');
+  sound.setMusicState(youWin || draw ? 'victory' : 'defeat');
+
+  const reasonText =
+    reason === 'host'
+      ? t('matchHostEnded')
+      : reason === 'time'
+        ? t('matchTimeUp')
+        : reason === 'peer-left'
+          ? t('peerLeft')
+          : '';
+
+  const body = [
+    `${t('mpKills')}: ${mpKills}`,
+    `${t('mpTheirKills')}: ${mpPeerKills}`,
+    reasonText,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  if (isLoggedIn()) {
+    submitScore({
+      mode: 'multiplayer',
+      score: mpKills,
+      mapId: world?.mapId,
+      flightTimeSec: flightTime,
+    }).catch(() => {});
+  }
+
+  mpLocalVote = null;
+  mpRemoteVote = null;
+  document.getElementById('results-title').textContent = title;
+  document.getElementById('results-body').textContent = body;
+  document.getElementById('results-solo-actions')?.classList.add('hidden');
+  document.getElementById('results-mp-actions')?.classList.remove('hidden');
+  updateMpVoteUi();
+  showScreen('results');
+  hud.show(false);
+  stopPresenceLoop();
+}
+
+function hostEndMatch() {
+  if (match.role !== 'host') return;
+  if (gameMode !== 'multiplayer' || mpMatchEnded) return;
+  if (state !== 'playing' && state !== 'paused') return;
+  mpHub.sendMatchEnd({ reason: 'host', kills: mpKills, deaths: mpDeaths });
+  endMpMatch('host');
+}
+
+function castMpVote(choice) {
+  if (gameMode !== 'multiplayer' || state !== 'results') return;
+  if (choice !== 'replay' && choice !== 'leave') return;
+
+  // Leave must always work — peer may already be gone (isConnected false).
+  if (choice === 'leave') {
+    mpLocalVote = choice;
+    if (match.isConnected) {
+      try {
+        mpHub.sendVote(choice);
+      } catch {
+        /* ignore */
+      }
+    }
+    match.destroy();
+    quitToMenu();
+    showScreen('multiplayer');
+    return;
+  }
+
+  if (!match.isConnected) return;
+  mpLocalVote = choice;
+  mpHub.sendVote(choice);
+  updateMpVoteUi();
+  tryMpRematch();
+}
+
+function tryMpRematch() {
+  if (mpLocalVote !== 'replay' || mpRemoteVote !== 'replay') return;
+  if (!match.isConnected) return;
+  if (match.role !== 'host') return;
+  hud.toast(t('rematchStarting'));
+  startMpRematch();
+}
+
+function startMpRematch() {
+  mpLobby.worldSeed = randomWorldSeed();
+  mpLobby.spawnAirportId = null;
+  sessionWorldSeed = mpLobby.worldSeed;
+  syncWorldSeedUi(sessionWorldSeed);
+  resetMpMatchStats();
+  mpHub.publishLobby({ ...mpLobby });
+  mpHub.sendRematch({ ...mpLobby });
+  beginMultiplayerMatch(mpLobby.mapId, { rematch: true });
+}
+
+function respawnLocalMp() {
+  if (gameMode !== 'multiplayer' || mpMatchEnded || state !== 'playing') {
+    mpDying = false;
+    return;
+  }
+  const spawnRole = match.role === 'guest' ? 'guest' : 'host';
+  const spawnInfo = resolveSpawn(world, {
+    role: spawnRole,
+    randomChance: mpLobby.airportSpawnChance,
+    airportId: mpLobby.spawnAirportId,
+  });
+  const mods = difficultyMods(mpLobby.difficulty);
+  const useFuel = !!mpLobby.fuelLimit;
+
+  flight.reset({
+    x: spawnInfo.x,
+    y: spawnInfo.y + flight.gearHeight,
+    z: spawnInfo.z,
+    heading: spawnInfo.heading,
+    pitch: 0,
+    roll: 0,
+  });
+  if (useFuel) flight.fuel = mods.startFuel ?? 100;
+  weapons?.clear?.();
+  clearMpRespawnTimer();
+  mpDying = false;
+  hud.toast(t('youDiedRespawn'), 1200);
+  sound.startEngine(getPlaneType(planeTypeIndex)?.id || planeTypeIndex, getPlaneType(planeTypeIndex)?.tag);
+  sound.startWind();
+}
+
+function handleLocalMpDeath() {
+  if (mpDying || mpMatchEnded || gameMode !== 'multiplayer') return;
+  mpDying = true;
+  mpDeaths += 1;
+  particles?.burstExplosion(flight.position);
+  sound.playCrash(flight.position.x, flight.position.y, flight.position.z);
+  if (settings.camShake) camRig.addShake(0.55);
+
+  match.sendEvent({
+    type: 'died',
+    kills: mpKills,
+    deaths: mpDeaths,
+  });
+
+  if (isMpDogfight() || (mpLobby.mode || 'dogfight') === 'freefly') {
+    hud.toast(t('youDiedRespawn'));
+    // Clear only the timer — keep mpDying true until respawn, or every
+    // frame re-fires death (kill spam) while the plane is still crashed.
+    if (mpRespawnTimer) {
+      clearTimeout(mpRespawnTimer);
+      mpRespawnTimer = null;
+    }
+    mpRespawnTimer = setTimeout(() => respawnLocalMp(), 1600);
+  } else {
+    endMpMatch('death');
+  }
 }
 
 function quitToMenu() {
@@ -716,7 +1153,14 @@ function quitToMenu() {
   stopPresenceLoop();
   clearModes();
   clearRemotePlane();
+  clearMpRespawnTimer();
+  mpDying = false;
+  mpMatchEnded = false;
+  mpLocalVote = null;
+  mpRemoteVote = null;
   document.getElementById('hud-chat')?.classList.add('hidden');
+  document.getElementById('results-solo-actions')?.classList.remove('hidden');
+  document.getElementById('results-mp-actions')?.classList.add('hidden');
   sound.stopEngine();
   sound.stopWind();
   sound.setStall(false);
@@ -729,6 +1173,7 @@ function quitToMenu() {
   }
   hud.show(false);
   showScreen('menu');
+  scene.background = new THREE.Color(0x143a5c);
   buildMenuPlane();
   camera.position.set(6, 3, 10);
   camera.lookAt(0, 1.5, 0);
@@ -736,8 +1181,13 @@ function quitToMenu() {
 }
 
 function restart() {
-  if (gameMode === 'multiplayer' && !match.isConnected) {
-    quitToMenu();
+  if (gameMode === 'multiplayer') {
+    // Solo restart is disabled in MP — use vote rematch from results
+    if (state === 'results') return;
+    if (!match.isConnected) {
+      quitToMenu();
+      return;
+    }
     return;
   }
   startGame(gameMode);
@@ -941,6 +1391,7 @@ function applyAndSaveSettings() {
   syncLangButtons();
   applySettingsEffects();
   fillSettingsForm();
+  persistSyncedSettingsToCloud();
   hud.toast(t('saved'));
 }
 
@@ -960,6 +1411,7 @@ function fillHostModal() {
   setVal('mp-difficulty', mpLobby.difficulty || 'normal');
   setVal('mp-max-players', mpLobby.maxPlayers ?? 2);
   setVal('mp-airport-spawn', mpLobby.airportSpawnChance ?? 5);
+  setVal('mp-duration', clampMatchDurationMin(mpLobby.matchDurationMin ?? 2));
   setChk('mp-fuel-limit', mpLobby.fuelLimit);
   setChk('mp-weather', mpLobby.weatherCycle !== false);
   setChk('mp-daynight', mpLobby.dayNight !== false);
@@ -995,6 +1447,7 @@ function readHostModal() {
     difficulty: document.getElementById('mp-difficulty')?.value || 'normal',
     maxPlayers: clampMaxPlayers(document.getElementById('mp-max-players')?.value),
     airportSpawnChance: clampAirportChance(document.getElementById('mp-airport-spawn')?.value),
+    matchDurationMin: clampMatchDurationMin(document.getElementById('mp-duration')?.value),
     fuelLimit: document.getElementById('mp-fuel-limit')?.checked === true,
     weatherCycle: document.getElementById('mp-weather')?.checked !== false,
     dayNight: document.getElementById('mp-daynight')?.checked !== false,
@@ -1029,19 +1482,56 @@ function localDisplayName() {
   return (u?.displayName || u?.username || 'Pilot').slice(0, 24);
 }
 
-function requireMpLogin() {
+/** Local client platform for MP tags. */
+function localDeviceKind() {
+  return input.isTouchUi ? 'mobile' : 'pc';
+}
+
+function deviceLabel(kind) {
+  if (kind === 'mobile') return t('deviceMobile');
+  if (kind === 'pc') return t('devicePc');
+  return '';
+}
+
+function formatMpName(name, deviceKind) {
+  const base = String(name || 'Pilot').slice(0, 24);
+  const tag = deviceLabel(deviceKind);
+  return tag ? `${base} · ${tag}` : base;
+}
+
+function mpDeviceBadgeHtml(kind) {
+  const label = deviceLabel(kind);
+  if (!label) return '';
+  const cls = kind === 'mobile' ? 'mobile' : 'pc';
+  return `<span class="mp-device ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function requireMpLogin(opts = {}) {
   if (isLoggedIn()) {
     localMpName = localDisplayName();
     return true;
   }
+  if (opts.pendingRoom) pendingMpRoom = String(opts.pendingRoom).trim().toLowerCase() || pendingMpRoom;
   hud.toast(t('loginRequiredMp'));
   openAuthModal();
   return false;
 }
 
+async function flushPendingMpJoin() {
+  if (!pendingMpRoom || !isLoggedIn()) return;
+  const room = pendingMpRoom;
+  pendingMpRoom = null;
+  showScreen('multiplayer');
+  await joinMatch(room);
+}
+
 function sendMpHello() {
   localMpName = localDisplayName();
-  match.sendEvent({ type: 'hello', name: localMpName });
+  match.sendEvent({
+    type: 'hello',
+    name: localMpName,
+    device: localDeviceKind(),
+  });
 }
 
 function appendChatMessage(name, text, self = false) {
@@ -1104,16 +1594,27 @@ function syncMpLobbyUi() {
 
   if (list) {
     const you = localDisplayName();
+    const youDevice = localDeviceKind();
     const peer = mpPeerName || (connected ? t('mpGuest') : '—');
     const rows = [];
     if (isHost) {
-      rows.push(`<li><span class="mp-role">${t('mpHost')}</span> ${escapeHtml(you)} <em>(${t('mpYou')})</em></li>`);
       rows.push(
-        `<li><span class="mp-role">${t('mpGuest')}</span> ${connected ? escapeHtml(peer) : '—'}</li>`
+        `<li><span class="mp-role">${t('mpHost')}</span> ${escapeHtml(you)}${mpDeviceBadgeHtml(youDevice)} <em>(${t('mpYou')})</em></li>`
+      );
+      rows.push(
+        `<li><span class="mp-role">${t('mpGuest')}</span> ${
+          connected ? `${escapeHtml(peer)}${mpDeviceBadgeHtml(mpPeerDevice)}` : '—'
+        }</li>`
       );
     } else if (match.role === 'guest') {
-      rows.push(`<li><span class="mp-role">${t('mpHost')}</span> ${escapeHtml(peer || '—')}</li>`);
-      rows.push(`<li><span class="mp-role">${t('mpGuest')}</span> ${escapeHtml(you)} <em>(${t('mpYou')})</em></li>`);
+      rows.push(
+        `<li><span class="mp-role">${t('mpHost')}</span> ${
+          peer !== '—' ? `${escapeHtml(peer)}${mpDeviceBadgeHtml(mpPeerDevice)}` : '—'
+        }</li>`
+      );
+      rows.push(
+        `<li><span class="mp-role">${t('mpGuest')}</span> ${escapeHtml(you)}${mpDeviceBadgeHtml(youDevice)} <em>(${t('mpYou')})</em></li>`
+      );
     } else {
       list.innerHTML = '';
       return;
@@ -1123,14 +1624,51 @@ function syncMpLobbyUi() {
 
   const hudMp = document.getElementById('hud-mp');
   if (hudMp && gameMode === 'multiplayer') {
-    hudMp.textContent = mpPeerName ? `MP · ${mpPeerName}` : 'MP';
+    hudMp.textContent = mpPeerName
+      ? `MP · ${formatMpName(mpPeerName, mpPeerDevice)}`
+      : 'MP';
+  }
+}
+
+function resetMpMatchStats() {
+  mpKills = 0;
+  mpDeaths = 0;
+  mpPeerKills = 0;
+  mpMatchEnded = false;
+  mpLocalVote = null;
+  mpRemoteVote = null;
+  mpDying = false;
+  mpPeerDiedIgnoreUntil = 0;
+  if (mpRespawnTimer) {
+    clearTimeout(mpRespawnTimer);
+    mpRespawnTimer = null;
+  }
+  const dur = clampMatchDurationMin(mpLobby.matchDurationMin ?? 2);
+  mpMatchTimeLeft = dur * 60;
+}
+
+function clearMpRespawnTimer() {
+  if (mpRespawnTimer) {
+    clearTimeout(mpRespawnTimer);
+    mpRespawnTimer = null;
   }
 }
 
 function resetMpLobbyState() {
   mpGuestConnected = false;
   mpPeerName = '';
+  mpPeerDevice = '';
   mpEditingSettings = false;
+  clearMpRespawnTimer();
+  mpDying = false;
+  mpPeerDiedIgnoreUntil = 0;
+  mpMatchEnded = false;
+  mpLocalVote = null;
+  mpRemoteVote = null;
+  mpKills = 0;
+  mpDeaths = 0;
+  mpPeerKills = 0;
+  mpMatchTimeLeft = null;
   syncMpLobbyUi();
 }
 
@@ -1160,6 +1698,9 @@ function updateMpStatus(info) {
     statusEl.textContent = mpGuestConnected ? t('peerInLobby') : t('waitingPeer');
     if (codeEl) codeEl.textContent = info.roomId || '';
     if (urlEl) urlEl.value = info.inviteUrl || '';
+    if (info.roomId && info.inviteUrl) {
+      setInviteRoomContext({ roomId: info.roomId, inviteUrl: info.inviteUrl });
+    }
   } else if (info.status === 'connecting') {
     box?.classList.remove('hidden');
     statusEl.textContent = t('connecting');
@@ -1171,6 +1712,7 @@ function updateMpStatus(info) {
     statusEl.textContent = 'Connection error';
   } else if (info.status === 'idle') {
     statusEl.textContent = '';
+    setInviteRoomContext(null);
     resetMpLobbyState();
   }
   syncMpLobbyUi();
@@ -1188,10 +1730,18 @@ match.onPeerState = (data) => {
   remoteInterp.targetQuat.set(data.qx, data.qy, data.qz, data.qw);
   remoteInterp.health = data.health ?? 100;
   remoteInterp.throttle = data.throttle ?? 0.5;
+  if (data.kills != null) mpPeerKills = Number(data.kills) || 0;
   if (data.name && data.name !== mpPeerName) {
     mpPeerName = String(data.name).slice(0, 24);
+    if (data.device === 'mobile' || data.device === 'pc') mpPeerDevice = data.device;
     refreshRemoteNameTag();
     syncMpLobbyUi();
+  } else if (data.device === 'mobile' || data.device === 'pc') {
+    if (data.device !== mpPeerDevice) {
+      mpPeerDevice = data.device;
+      refreshRemoteNameTag();
+      syncMpLobbyUi();
+    }
   }
   if (data.skin != null && data.skin !== remoteInterp.skin && remotePlane) {
     remoteInterp.skin = data.skin;
@@ -1203,15 +1753,18 @@ match.onPeerState = (data) => {
   }
 };
 
-function beginMultiplayerMatch(mapId) {
-  if (state === 'playing' && gameMode === 'multiplayer') return;
+function beginMultiplayerMatch(mapId, opts = {}) {
+  const rematch = !!opts.rematch;
+  if (state === 'playing' && gameMode === 'multiplayer' && !rematch) return;
   document.getElementById('hud-chat')?.classList.remove('hidden');
+  resetMpMatchStats();
   startGame('multiplayer', mapId || mpLobby.mapId);
 }
 
 match.onEvent = (ev) => {
   if (ev.type === 'hello') {
     mpPeerName = String(ev.name || '').slice(0, 24) || t('mpGuest');
+    mpPeerDevice = ev.device === 'mobile' || ev.device === 'pc' ? ev.device : mpPeerDevice;
     refreshRemoteNameTag();
     syncMpLobbyUi();
     return;
@@ -1222,6 +1775,7 @@ match.onEvent = (ev) => {
   }
   if (ev.type === 'kick') {
     hud.toast(t('kicked'));
+    pendingMpRoom = null;
     match.destroy();
     resetMpLobbyState();
     clearRoomFromUrl();
@@ -1231,8 +1785,45 @@ match.onEvent = (ev) => {
     return;
   }
   if (ev.type === 'start') {
-    if (state === 'playing' || state === 'paused') return;
+    if ((state === 'playing' || state === 'paused') && gameMode === 'multiplayer') return;
     beginMultiplayerMatch(mpLobby.mapId);
+    return;
+  }
+  if (ev.type === 'rematch') {
+    if (ev.config) {
+      mpLobby = {
+        ...mpLobby,
+        ...ev.config,
+        worldSeed:
+          ev.config.worldSeed != null ? ev.config.worldSeed >>> 0 : mpLobby.worldSeed,
+        matchDurationMin: clampMatchDurationMin(
+          ev.config.matchDurationMin ?? mpLobby.matchDurationMin
+        ),
+      };
+      if (mpLobby.worldSeed != null) sessionWorldSeed = mpLobby.worldSeed >>> 0;
+      mpHub.setConfig(mpLobby);
+    }
+    hud.toast(t('rematchStarting'));
+    beginMultiplayerMatch(mpLobby.mapId, { rematch: true });
+    return;
+  }
+  if (ev.type === 'match-end') {
+    if (mpMatchEnded) return;
+    if (ev.kills != null) mpPeerKills = Number(ev.kills) || mpPeerKills;
+    endMpMatch(ev.reason || 'host', { peerKills: mpPeerKills });
+    return;
+  }
+  if (ev.type === 'vote') {
+    const choice = ev.choice === 'leave' ? 'leave' : ev.choice === 'replay' ? 'replay' : null;
+    if (!choice) return;
+    mpRemoteVote = choice;
+    updateMpVoteUi();
+    if (choice === 'leave') {
+      hud.toast(t('peerLeft'));
+      // Peer is leaving — if they disconnect PeerJS will fire peer-left
+      return;
+    }
+    tryMpRematch();
     return;
   }
   if (ev.type === 'lobby') {
@@ -1249,6 +1840,9 @@ match.onEvent = (ev) => {
         ev.config?.airportSpawnChance ?? mpLobby.airportSpawnChance
       ),
       maxPlayers: clampMaxPlayers(ev.config?.maxPlayers ?? mpLobby.maxPlayers),
+      matchDurationMin: clampMatchDurationMin(
+        ev.config?.matchDurationMin ?? mpLobby.matchDurationMin
+      ),
     };
     if (mpLobby.worldSeed != null) sessionWorldSeed = mpLobby.worldSeed >>> 0;
     weapons?.setEnabled(mpLobby.weaponFlags);
@@ -1300,28 +1894,34 @@ match.onEvent = (ev) => {
     mpHub.reset();
     mpGuestConnected = false;
     mpPeerName = '';
+    mpPeerDevice = '';
     syncMpLobbyUi();
     const inMatch =
-      gameMode === 'multiplayer' && (state === 'playing' || state === 'paused');
-    if (inMatch) {
-      endGame(t('youWin'), t('peerLeft'));
-    } else if (match.role === 'guest') {
-      match.destroy();
-      resetMpLobbyState();
-      clearRoomFromUrl();
-      document.getElementById('mp-host-box')?.classList.add('hidden');
-      showScreen('multiplayer');
-    } else if (match.role === 'host') {
+      gameMode === 'multiplayer' &&
+      (state === 'playing' || state === 'paused' || state === 'results');
+    if (inMatch && !mpMatchEnded) {
+      endMpMatch('peer-left');
+    } else if (state === 'results' && gameMode === 'multiplayer') {
+      // Peer left during vote screen
+      mpRemoteVote = 'leave';
+      updateMpVoteUi();
+      hud.toast(t('peerLeft'));
+    } else if (match.role === 'guest' && state !== 'results') {
+      // Stay on lobby and let Matchmaking attempt a soft rejoin (do not destroy).
+      document.getElementById('mp-status').textContent = t('connecting');
+      syncMpLobbyUi();
+    } else if (match.role === 'host' && state !== 'results') {
       document.getElementById('mp-status').textContent = t('waitingPeer');
     }
   } else if (ev.type === 'damage') {
-    if (state !== 'playing' || gameMode !== 'multiplayer') return;
+    if (state !== 'playing' || gameMode !== 'multiplayer' || mpMatchEnded || mpDying) return;
     const mods = difficultyMods(mpLobby.difficulty);
     const amt = (Number(ev.amount) || 0) * mods.damageScale;
     if (amt <= 0) return;
     flight.takeDamage(amt);
     if (settings.camShake) camRig.addShake(0.22);
     sound.playHit();
+    if (flight.crashed || flight.health <= 0) handleLocalMpDeath();
   } else if (ev.type === 'fire') {
     if (!weapons) return;
     const origin = new THREE.Vector3(ev.x, ev.y, ev.z);
@@ -1343,12 +1943,19 @@ match.onEvent = (ev) => {
       lockTarget,
     });
   } else if (ev.type === 'died') {
-    if (
-      gameMode === 'multiplayer' &&
-      (state === 'playing' || state === 'paused')
-    ) {
-      endGame(t('youWin'), t('peerLeft'));
-    }
+    if (gameMode !== 'multiplayer' || mpMatchEnded) return;
+    if (state !== 'playing' && state !== 'paused') return;
+    // Deduplicate death spam (e.g. old clients / race before respawn gate)
+    const now = performance.now();
+    if (now < mpPeerDiedIgnoreUntil) return;
+    mpPeerDiedIgnoreUntil = now + 2200;
+    // Victim died — award a kill to the local player
+    mpKills += 1;
+    if (ev.kills != null) mpPeerKills = Number(ev.kills) || mpPeerKills;
+    particles?.burstExplosion(remoteInterp.pos);
+    sound.playScore();
+    hud.toast(t('killedPeer'));
+    if (settings.camShake) camRig.addShake(0.12);
   }
 };
 
@@ -1374,17 +1981,18 @@ async function hostMatch() {
     document.getElementById('mp-room-code').textContent = roomId;
     document.getElementById('mp-invite-url').value = inviteUrl;
     document.getElementById('mp-status').textContent = t('waitingPeer');
+    setInviteRoomContext({ roomId, inviteUrl });
     syncMpLobbyUi();
   } catch (e) {
     console.error(e);
     hud.toast(t('hostFailed'));
+    setInviteRoomContext(null);
   }
 }
 
 async function joinMatch(code) {
-  if (!requireMpLogin()) return;
-  await unlockAudio();
-  let room = (code || '').trim();
+  const raw = (code || '').trim();
+  let room = raw;
   if (room.includes('room=')) {
     try {
       room = new URL(room).searchParams.get('room') || room;
@@ -1393,7 +2001,14 @@ async function joinMatch(code) {
       if (m) room = m[1];
     }
   }
+  room = String(room || '')
+    .trim()
+    .toLowerCase();
   if (!room) return;
+
+  if (!requireMpLogin({ pendingRoom: room })) return;
+  await unlockAudio();
+
   mpChatHistory.length = 0;
   renderChatLogs();
   resetMpLobbyState();
@@ -1403,14 +2018,19 @@ async function joinMatch(code) {
     document.getElementById('mp-host-box')?.classList.remove('hidden');
     await match.join(room);
     clearRoomFromUrl();
+    pendingMpRoom = null;
     document.getElementById('mp-status').textContent = t('waitingHostStart');
     syncMpLobbyUi();
   } catch (e) {
     console.error(e);
-    const msg = e?.type === 'peer-unavailable' || /peer|connect/i.test(String(e?.message || e))
-      ? t('joinFailedHint')
-      : t('joinFailed');
+    const msg =
+      e?.type === 'peer-unavailable' ||
+      e?.type === 'peer_open_timeout' ||
+      /peer|connect|timeout/i.test(String(e?.message || e))
+        ? t('joinFailedHint')
+        : t('joinFailed');
     hud.toast(msg);
+    document.getElementById('mp-status').textContent = msg;
   }
 }
 
@@ -1427,6 +2047,7 @@ function hostKickGuest() {
   match.kickGuest();
   mpGuestConnected = false;
   mpPeerName = '';
+  mpPeerDevice = '';
   hud.toast(t('peerLeft'));
   document.getElementById('mp-status').textContent = t('waitingPeer');
   syncMpLobbyUi();
@@ -1445,7 +2066,23 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
       if (!requireMpLogin()) return;
       showScreen('multiplayer');
     }
-    if (action === 'close-multiplayer') showScreen('menu');
+    if (action === 'close-multiplayer') {
+      await match.destroy();
+      clearRoomFromUrl();
+      pendingMpRoom = null;
+      resetMpLobbyState();
+      mpChatHistory.length = 0;
+      renderChatLogs();
+      document.getElementById('mp-host-box')?.classList.add('hidden');
+      document.getElementById('hud-chat')?.classList.add('hidden');
+      setInviteRoomContext(null);
+      showScreen('menu');
+      return;
+    }
+    if (action === 'close-inbox') {
+      showScreen('menu');
+      return;
+    }
     if (action === 'mp-host-open') {
       if (!requireMpLogin()) return;
       openHostModal(false);
@@ -1477,6 +2114,7 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
       renderChatLogs();
       document.getElementById('mp-host-box')?.classList.add('hidden');
       document.getElementById('hud-chat')?.classList.add('hidden');
+      setInviteRoomContext(null);
     }
     if (action === 'options' || action === 'options-from-pause') {
       fillSettingsForm();
@@ -1487,14 +2125,37 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
       showScreen(state === 'paused' ? 'pause' : 'menu');
     }
     if (action === 'settings-apply') applyAndSaveSettings();
+    if (action === 'graphics-autodetect') {
+      autoDetectBestGraphics();
+      return;
+    }
+    if (action === 'touch-layout-edit') {
+      openTouchLayoutEditor();
+      return;
+    }
+    if (action === 'touch-layout-done') {
+      finishTouchLayoutEditor(true);
+      return;
+    }
+    if (action === 'touch-layout-cancel') {
+      finishTouchLayoutEditor(false);
+      return;
+    }
+    if (action === 'touch-layout-reset') {
+      resetTouchLayoutDraft();
+      return;
+    }
     if (action === 'settings-reset') {
       settings = {
         ...DEFAULT_SETTINGS,
         announcement: { ...DEFAULT_SETTINGS.announcement },
         keyBindings: cloneKeyBindings(DEFAULT_KEY_BINDINGS),
+        touchLayout: null,
       };
       fillSettingsForm();
       applySettingsEffects();
+      saveSettings(settings);
+      persistSyncedSettingsToCloud();
       hud.toast(t('resetDefaults'));
       return;
     }
@@ -1502,6 +2163,8 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
       settings.keyBindings = cloneKeyBindings(DEFAULT_KEY_BINDINGS);
       refreshKeybindButtons();
       input.setKeyBindings(settings.keyBindings);
+      saveSettings(settings);
+      persistSyncedSettingsToCloud();
       hud.toast(t('keybindReset'));
       return;
     }
@@ -1510,6 +2173,18 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
       showScreen('none');
     }
     if (action === 'restart') restart();
+    if (action === 'mp-end-match') {
+      hostEndMatch();
+      return;
+    }
+    if (action === 'mp-vote-replay') {
+      castMpVote('replay');
+      return;
+    }
+    if (action === 'mp-vote-leave') {
+      castMpVote('leave');
+      return;
+    }
     if (action === 'quit') {
       if (gameMode === 'multiplayer') await match.destroy();
       quitToMenu();
@@ -1559,6 +2234,7 @@ document.querySelectorAll('.lang-btn').forEach((btn) => {
     updateBanner();
     fillSettingsForm();
     updatePlanePickerUi();
+    persistSyncedSettingsToCloud();
   });
 });
 
@@ -1577,9 +2253,12 @@ document.getElementById('announce-close')?.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
+  if (!isHangarPreviewVisible()) {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  }
   renderer.setSize(window.innerWidth, window.innerHeight);
+  syncMenuStageHole();
 });
 
 document.getElementById('menu-map')?.addEventListener('change', (e) => {
@@ -1612,28 +2291,47 @@ window.addEventListener(
 );
 
 // ----- Init -----
+registerServiceWorker();
+bindInstallPrompt();
 setLang(settings.language);
 syncLangButtons();
-if (input.isTouchUi) {
+
+const pwaBlocked = applyPwaGate();
+document.getElementById('pwa-install-btn')?.addEventListener('click', async () => {
+  const ok = await promptPwaInstall();
+  if (!ok) {
+    /* user dismissed — steps on the card still apply */
+  }
+  applyPwaGate();
+  applyDomLang();
+});
+window.addEventListener('appinstalled', () => {
+  applyPwaGate();
+  applyDomLang();
+});
+window.matchMedia('(display-mode: standalone)').addEventListener?.('change', () => {
+  applyPwaGate();
+  syncOrientationLock();
+});
+
+if (input.isTouchUi || isTouchMobile()) {
   document.body.classList.add('touch-ui');
+  document.querySelectorAll('.touch-only-ui').forEach((el) => el.classList.remove('hidden'));
   const hint = document.querySelector('#menu .hint');
   if (hint) hint.setAttribute('data-i18n', 'hintMobile');
   document.querySelector('.keybind-touch-note')?.classList.remove('hidden');
+  applyTouchLayout(settings.touchLayout);
   window.addEventListener('orientationchange', () => {
     syncOrientationLock();
     setTimeout(() => syncOrientationLock(), 250);
   });
   window.addEventListener('resize', () => syncOrientationLock());
-  // Fullscreen from any gesture (menu + game + settings)
-  const requestFs = () => {
-    tryEnterFullscreen();
+  // Re-lock landscape on gesture (no fullscreen)
+  const relock = () => {
+    if (!isPwaGateActive()) forceLandscape();
     syncOrientationLock();
   };
-  document.getElementById('rotate-lock')?.addEventListener('pointerdown', requestFs, {
-    passive: true,
-  });
-  window.addEventListener('pointerdown', requestFs, { passive: true });
-  window.addEventListener('touchstart', requestFs, { passive: true });
+  window.addEventListener('pointerdown', relock, { passive: true });
   document.getElementById('nav-back')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1642,8 +2340,10 @@ if (input.isTouchUi) {
   window.addEventListener('popstate', () => {
     navigateBack();
   });
-  syncOrientationLock();
-  syncNavBack();
+  if (!pwaBlocked) {
+    syncOrientationLock();
+    syncNavBack();
+  }
 }
 applyDomLang();
 updateBanner();
@@ -1655,25 +2355,59 @@ setSettingsMode('simple');
 syncWorldVisibility();
 syncTouchUi();
 buildMenuPlane();
-setupAuthUI();
 document.getElementById('mp-host-close')?.addEventListener('click', () => closeHostModal());
 camera.position.set(6, 3, 10);
 camera.lookAt(0, 1.5, 0);
 showScreen('menu');
 applySettingsEffects();
 
-const menuLight = new THREE.DirectionalLight(0xffe8cc, 1);
+const menuLight = new THREE.DirectionalLight(0xffe8cc, 1.15);
 menuLight.position.set(5, 10, 7);
 scene.add(menuLight);
-scene.add(new THREE.AmbientLight(0x6080a0, 0.5));
-scene.background = null;
+scene.add(new THREE.AmbientLight(0x6080a0, 0.62));
+scene.add(new THREE.HemisphereLight(0x8ec8f0, 0x1a4028, 0.45));
+scene.background = new THREE.Color(0x143a5c);
 
-// Auto-join from invite link
-const urlRoom = getRoomFromUrl();
-if (urlRoom) {
-  showScreen('multiplayer');
-  if (requireMpLogin()) joinMatch(urlRoom);
-}
+// Await auth before invite auto-join so logged-in tokens hydrate currentUser first.
+(async () => {
+  await setupAuthUI();
+  setupInboxUI();
+  setInboxJoinLobbyHandler((roomId) => {
+    showScreen('multiplayer');
+    if (isLoggedIn()) joinMatch(roomId);
+    else {
+      pendingMpRoom = String(roomId).trim().toLowerCase();
+      openAuthModal();
+    }
+  });
+  document.getElementById('btn-inbox')?.addEventListener('click', () => {
+    if (!isLoggedIn()) {
+      openAuthModal();
+      return;
+    }
+    showScreen('inbox');
+  });
+  onAuthChanged((user) => {
+    if (user) {
+      mergeCloudUserSettings(user);
+      flushPendingMpJoin();
+    }
+  });
+  mergeCloudUserSettings(getUser());
+  if (isPwaGateActive() || !canPlayGame()) {
+    applyPwaGate();
+    return;
+  }
+  const urlRoom = getRoomFromUrl();
+  if (urlRoom) {
+    showScreen('multiplayer');
+    if (isLoggedIn()) joinMatch(urlRoom);
+    else {
+      pendingMpRoom = String(urlRoom).trim().toLowerCase();
+      requireMpLogin({ pendingRoom: pendingMpRoom });
+    }
+  }
+})();
 
 document.getElementById('mp-chat-input')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
@@ -1736,6 +2470,9 @@ function updateMultiplayer(dt, fi) {
     throttle: flight.throttle,
     skin: planeTypeIndex,
     name: localMpName || localDisplayName(),
+    device: localDeviceKind(),
+    kills: mpKills,
+    deaths: mpDeaths,
   });
 
   // Territory soft boundary
@@ -1743,10 +2480,7 @@ function updateMultiplayer(dt, fi) {
   if (terr.t > 0.55 && Math.random() < 0.02) hud.toast(t('territoryWarn'));
 
   if (flight.crashed || flight.health <= 0) {
-    match.sendEvent({ type: 'died' });
-    particles.burstExplosion(flight.position);
-    sound.playCrash(flight.position.x, flight.position.y, flight.position.z);
-    endGame(t('youLose'), t('youCrashed'));
+    handleLocalMpDeath();
   }
 }
 
@@ -1793,13 +2527,15 @@ function buildHitTargets() {
       kind: 'peer',
       owner: 'remote',
     });
-    hitTargets.push({
-      position: flight.position,
-      radius: flight.hitRadius ?? 3.2,
-      id: 'self',
-      kind: 'self',
-      owner: 'local',
-    });
+    if (!mpDying) {
+      hitTargets.push({
+        position: flight.position,
+        radius: flight.hitRadius ?? 3.2,
+        id: 'self',
+        kind: 'self',
+        owner: 'local',
+      });
+    }
   }
   return hitTargets;
 }
@@ -2039,7 +2775,9 @@ function updatePlaying(dt) {
     time: performance.now() * 0.001,
   });
 
-  flight.update(dt, fi, (x, z) => world.getHeight(x, z));
+  if (!(gameMode === 'multiplayer' && mpDying && !mpMatchEnded)) {
+    flight.update(dt, fi, (x, z) => world.getHeight(x, z));
+  }
 
   if (fuelDrops?.enabled) {
     const got = fuelDrops.update(dt, flight.position, (x, z) => world.getHeight(x, z));
@@ -2179,6 +2917,9 @@ function updatePlaying(dt) {
         flight.takeDamage(damage * mods.damageScale);
         sound.playHit();
         if (settings.camShake) camRig.addShake(0.28);
+        if (gameMode === 'multiplayer' && (flight.crashed || flight.health <= 0)) {
+          handleLocalMpDeath();
+        }
       }
     },
     world ? (x, z) => world.getHeight(x, z) : null
@@ -2267,8 +3008,19 @@ function updatePlaying(dt) {
   }
 
   if (gameMode === 'multiplayer') {
-    objective = t('objectiveMp');
-    score = Math.max(0, Math.floor(100 - remoteInterp.health));
+    objective = isMpDogfight()
+      ? `${t('objectiveMp')} · ${t('mpKills')}: ${mpKills}`
+      : t('objectiveMp');
+    score = mpKills;
+    if (!mpMatchEnded && mpMatchTimeLeft != null) {
+      mpMatchTimeLeft = Math.max(0, mpMatchTimeLeft - dt);
+      timer = mpMatchTimeLeft;
+      if (mpMatchTimeLeft <= 0 && match.role === 'host') {
+        mpHub.sendMatchEnd({ reason: 'time', kills: mpKills, deaths: mpDeaths });
+        endMpMatch('time');
+        return;
+      }
+    }
     markers.push({
       id: 'peer',
       kind: 'peer',
@@ -2391,14 +3143,14 @@ function updatePlaying(dt) {
 function updateMenu(dt) {
   syncWorldVisibility();
   if (menuPlane && menuParts) {
-    menuPlane.rotation.y += dt * 0.55;
+    menuPlane.rotation.y += dt * 0.65;
     updatePlaneVisuals(
       menuParts,
       {
-        rollInput: Math.sin(performance.now() * 0.001) * 0.3,
+        rollInput: Math.sin(performance.now() * 0.001) * 0.22,
         pitchInput: 0,
         yawInput: 0,
-        throttle: 0.6,
+        throttle: 0.55,
         airspeed: 40,
         onGround: true,
       },
@@ -2408,9 +3160,99 @@ function updateMenu(dt) {
   if (world?.group?.visible) {
     world.update(dt, 'clear', camera.position, { advanceTime: false });
   }
-  const tOrbit = performance.now() * 0.0003;
-  camera.position.set(Math.cos(tOrbit) * 9, 3.5, Math.sin(tOrbit) * 9);
-  camera.lookAt(0, 1.2, 0);
+
+  // Frame plane for stage-local camera (scissor renders into #menu-plane-stage)
+  if (menuPlane) menuPlane.position.set(0, 1.15, 0);
+  const tOrbit = performance.now() * 0.00028;
+  const radius = 6.4;
+  const camY = 2.35;
+  const angle = Math.PI * 0.18 + Math.sin(tOrbit) * 0.32;
+  camera.position.set(Math.cos(angle) * radius, camY, Math.sin(angle) * radius);
+  camera.lookAt(0, 1.15, 0);
+}
+
+function isHangarPreviewVisible() {
+  return !!(menuPlane && menuEl && !menuEl.classList.contains('hidden'));
+}
+
+/** Punch a transparent hole in `.menu-bg` exactly over the stage rect. */
+function syncMenuStageHole() {
+  const bg = menuEl?.querySelector?.('.menu-bg');
+  const stage = document.getElementById('menu-plane-stage');
+  if (!bg) return;
+  if (!isHangarPreviewVisible() || !stage) {
+    clearMenuStageHole();
+    return;
+  }
+  const br = bg.getBoundingClientRect();
+  const sr = stage.getBoundingClientRect();
+  if (br.width < 2 || br.height < 2 || sr.width < 2 || sr.height < 2) {
+    clearMenuStageHole();
+    return;
+  }
+  const l = ((sr.left - br.left) / br.width) * 100;
+  const t = ((sr.top - br.top) / br.height) * 100;
+  const r = ((sr.right - br.left) / br.width) * 100;
+  const b = ((sr.bottom - br.top) / br.height) * 100;
+  bg.style.clipPath = `polygon(evenodd, 0% 0%, 100% 0%, 100% 100%, 0% 100%, ${l}% ${t}%, ${l}% ${b}%, ${r}% ${b}%, ${r}% ${t}%)`;
+  bg.style.webkitClipPath = bg.style.clipPath;
+}
+
+function clearMenuStageHole() {
+  const bg = menuEl?.querySelector?.('.menu-bg');
+  if (!bg) return;
+  bg.style.clipPath = '';
+  bg.style.webkitClipPath = '';
+}
+
+function restoreFullViewport() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, w, h);
+  camera.aspect = w / Math.max(1, h);
+  camera.updateProjectionMatrix();
+}
+
+/** Render hangar plane only inside `#menu-plane-stage`. */
+function renderHangarPreview() {
+  const stage = document.getElementById('menu-plane-stage');
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  syncMenuStageHole();
+
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, w, h);
+  renderer.setClearColor(0x143a5c, 1);
+  renderer.clear();
+
+  if (!stage) return;
+  const rect = stage.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;
+
+  const x = Math.max(0, Math.floor(rect.left));
+  const y = Math.max(0, Math.floor(h - rect.bottom));
+  const rw = Math.min(Math.ceil(rect.width), w - x);
+  const rh = Math.min(Math.ceil(rect.height), h - y);
+  if (rw < 2 || rh < 2) return;
+
+  camera.aspect = rw / rh;
+  camera.updateProjectionMatrix();
+  renderer.setScissorTest(true);
+  renderer.setScissor(x, y, rw, rh);
+  renderer.setViewport(x, y, rw, rh);
+  renderer.render(scene, camera);
+  renderer.setScissorTest(false);
+}
+
+function renderFrame() {
+  if (isHangarPreviewVisible()) {
+    renderHangarPreview();
+    return;
+  }
+  clearMenuStageHole();
+  restoreFullViewport();
+  renderer.render(scene, camera);
 }
 
 function frame(now) {
@@ -2454,7 +3296,7 @@ function frame(now) {
     updateMenu(dt);
   }
 
-  renderer.render(scene, camera);
+  renderFrame();
 }
 
 let rafId = 0;

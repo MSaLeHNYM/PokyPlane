@@ -10,6 +10,18 @@
 </p>
 
 <p align="center">
+  <a href="https://pokyplane.liara.run"><img src="https://img.shields.io/badge/▶%20Play%20now-pokyplane.liara.run-1a4a7a?style=for-the-badge" alt="Play PokyPlane" /></a>
+</p>
+
+<p align="center">
+  <a href="https://pokyplane.liara.run"><strong>https://pokyplane.liara.run</strong></a>
+</p>
+
+<p align="center">
+  <em>Fly 8 planes across 5 procedural maps — dogfight AI or friends, unlock ammo & coins, spin the wheel of luck, and customize your loadout. EN/FA · PWA on mobile.</em>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Proprietary-red.svg" alt="Proprietary — All Rights Reserved" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D18-339933?logo=node.js&logoColor=white" alt="Node.js >=18" />
   <img src="https://img.shields.io/badge/Three.js-0.170-black?logo=three.js&logoColor=white" alt="Three.js" />
@@ -279,7 +291,10 @@ Default admin (change in `.env` before production):
 
 ## Quick start
 
-Game only (no accounts or leaderboard):
+**Live game:** [https://pokyplane.liara.run](https://pokyplane.liara.run)  
+**Admin panel (production):** [https://pokyplane.liara.run/admin/](https://pokyplane.liara.run/admin/)
+
+Game only (local dev, no accounts or leaderboard):
 
 ```bash
 npm install

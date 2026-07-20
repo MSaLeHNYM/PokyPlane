@@ -66,8 +66,9 @@ const peerServer = ExpressPeerServer(server, {
   path: '/',
   allow_discovery: false,
   proxied: true, // Liara / reverse proxies
-  expire_timeout: 12000,
-  alive_timeout: 90000,
+  // Release stale peer IDs quickly so re-hosting never blocks on old sessions.
+  expire_timeout: 8000,
+  alive_timeout: 35000,
 });
 app.use('/peerjs', peerServer);
 

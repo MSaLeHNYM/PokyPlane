@@ -1598,8 +1598,7 @@ function isBusyInMultiplayer() {
 }
 
 function canOpenNewHostSession() {
-  // Editing settings of your current lobby is allowed via mp-edit-settings.
-  if (match.role === 'host' && (match.status === 'hosting' || match.isConnected)) return false;
+  // Allow unlimited new lobbies; only block while an actual match is in progress.
   return !isBusyInMultiplayer();
 }
 
@@ -1866,6 +1865,14 @@ match.onEvent = (ev) => {
     appendChatMessage(ev.name, ev.text, false);
     return;
   }
+  if (ev.type === 'lobby-afk-timeout') {
+    hud.toast(t('lobbyAfkClosed'));
+    resetMpLobbyState();
+    document.getElementById('mp-host-box')?.classList.add('hidden');
+    setInviteRoomContext(null);
+    showScreen('multiplayer');
+    return;
+  }
   if (ev.type === 'kick') {
     hud.toast(t('kicked'));
     pendingMpRoom = null;
@@ -2055,7 +2062,7 @@ match.onEvent = (ev) => {
 async function hostMatch() {
   if (!requireMpLogin()) return;
   await unlockAudio();
-  if (mpEditingSettings || (match.role === 'host' && (match.status === 'hosting' || match.isConnected))) {
+  if (mpEditingSettings) {
     applyHostSettingsFromModal();
     return;
   }
@@ -2074,7 +2081,9 @@ async function hostMatch() {
   syncWorldSeedUi(sessionWorldSeed);
   closeHostModal();
   try {
-    const { inviteUrl, roomId } = await match.host();
+    const hostingAlready =
+      match.role === 'host' && (match.status === 'hosting' || match.status === 'connected' || match.isConnected);
+    const { inviteUrl, roomId } = hostingAlready ? await match.replaceHost() : await match.host();
     document.getElementById('mp-host-box')?.classList.remove('hidden');
     document.getElementById('mp-room-code').textContent = roomId;
     document.getElementById('mp-invite-url').value = inviteUrl;

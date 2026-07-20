@@ -12,6 +12,8 @@ const JOIN_ATTEMPT_MS = 5000;
 const PEER_OPEN_MS = 15000;
 const HEARTBEAT_MS = 3000;
 const HOST_REREGISTER_MS = 900;
+/** Close empty host lobby after this long with no guest connected. */
+const LOBBY_AFK_MS = 30_000;
 
 /** Prefer cloud; set VITE_PEER_LOCAL=1 or ?peerLocal=1 to use same-origin /peerjs. */
 export function useLocalPeerServer() {
@@ -101,10 +103,24 @@ function safeCloseConn(conn) {
   }
 }
 
-async function postHeartbeat(roomId) {
+async function postHeartbeat(roomId, guestConnected = false) {
   if (!roomId || typeof fetch !== 'function') return;
   try {
     await fetch('/api/mp/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId, guestConnected }),
+      keepalive: true,
+    });
+  } catch {
+    /* optional */
+  }
+}
+
+async function postLeave(roomId) {
+  if (!roomId || typeof fetch !== 'function') return;
+  try {
+    await fetch('/api/mp/leave', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId }),
@@ -250,6 +266,8 @@ export class Matchmaking {
     this._onVis = null;
     this._kicking = false;
     this._joinGeneration = 0;
+    this._lobbyAfkTimer = null;
+    this._leaveRoomId = null;
   }
 
   get inviteUrl() {
@@ -278,12 +296,32 @@ export class Matchmaking {
     }
   }
 
+  _clearLobbyAfkTimer() {
+    if (this._lobbyAfkTimer) {
+      clearTimeout(this._lobbyAfkTimer);
+      this._lobbyAfkTimer = null;
+    }
+  }
+
+  _startLobbyAfkTimer() {
+    this._clearLobbyAfkTimer();
+    if (this.role !== 'host' || this._destroyed) return;
+    if (this.conn?.open) return;
+    this._lobbyAfkTimer = setTimeout(() => {
+      this._lobbyAfkTimer = null;
+      if (this._destroyed || this.role !== 'host') return;
+      if (this.conn?.open) return;
+      this.onEvent?.({ type: 'lobby-afk-timeout' });
+      this.destroy({ reason: 'lobby-afk' });
+    }, LOBBY_AFK_MS);
+  }
+
   _startHeartbeat() {
     this._clearHeartbeat();
     if (!this.roomId || this.role !== 'host') return;
     const beat = () => {
       if (this._destroyed || !this.peer?.open) return;
-      postHeartbeat(this.roomId);
+      postHeartbeat(this.roomId, !!this.conn?.open);
     };
     beat();
     this._heartbeatTimer = setInterval(beat, HEARTBEAT_MS);
@@ -301,8 +339,10 @@ export class Matchmaking {
     conn.on('open', () => {
       if (this._destroyed) return;
       this.status = 'connected';
+      this._clearLobbyAfkTimer();
       this._emitStatus();
       this.onEvent?.({ type: 'peer-joined' });
+      if (this.role === 'host') postHeartbeat(this.roomId, true);
     });
     conn.on('data', (data) => {
       if (!data || typeof data !== 'object') return;
@@ -320,7 +360,10 @@ export class Matchmaking {
       this.status = this.role === 'host' ? 'hosting' : 'idle';
       this.onEvent?.({ type: 'peer-left' });
       this._emitStatus();
-      if (this.role === 'guest' && !this._kicking) {
+      if (this.role === 'host') {
+        postHeartbeat(this.roomId, false);
+        this._startLobbyAfkTimer();
+      } else if (this.role === 'guest' && !this._kicking) {
         this._scheduleGuestRejoin();
       }
     });
@@ -405,6 +448,7 @@ export class Matchmaking {
         this.roomId = openId;
         this.status = this.conn?.open ? 'connected' : 'hosting';
         this._startHeartbeat();
+        this._startLobbyAfkTimer();
         this._emitStatus();
       } catch (err) {
         console.warn('[matchmaking] reregister failed', err);
@@ -492,6 +536,7 @@ export class Matchmaking {
         const openId = await waitForPeerOpen(this.peer, PEER_OPEN_MS);
         this.roomId = openId;
         this._startHeartbeat();
+        this._startLobbyAfkTimer();
         this._emitStatus();
         return { roomId: openId, inviteUrl: this.inviteUrl };
       } catch (err) {
@@ -645,10 +690,12 @@ export class Matchmaking {
     return this.status === 'connected' && !!this.conn?.open;
   }
 
-  async destroy() {
+  async destroy(opts = {}) {
+    const leavingRoom = this.roomId;
     this._destroyed = true;
     this._joinGeneration += 1;
     this._clearHeartbeat();
+    this._clearLobbyAfkTimer();
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
@@ -675,6 +722,19 @@ export class Matchmaking {
     this._remoteState = null;
     this._kicking = false;
     this._emitStatus();
+    if (leavingRoom && opts.reason !== 'replace-host') {
+      this._leaveRoomId = leavingRoom;
+      postLeave(leavingRoom);
+    }
+  }
+
+  /** Fully tear down, then open a fresh host lobby (unlimited re-host). */
+  async replaceHost() {
+    const prevRoom = this.roomId;
+    await this.destroy({ reason: 'replace-host' });
+    if (prevRoom) postLeave(prevRoom);
+    this._destroyed = false;
+    return this.host();
   }
 }
 

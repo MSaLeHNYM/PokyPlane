@@ -189,6 +189,7 @@
         </nav>
         <div class="menu-economy-row" id="menu-economy-row">
           <span id="coins-chip" class="coins-chip hidden" title="Coins">🪙 <span id="coins-chip-value">0</span></span>
+          <button type="button" class="menu-btn menu-btn-sm" data-action="hangar" data-i18n="hangar">Hangar</button>
           <button type="button" class="menu-btn menu-btn-sm" data-action="armory" data-i18n="armory">Armory</button>
           <button type="button" class="menu-btn menu-btn-sm" id="btn-rewards" data-action="rewards" data-i18n="rewards">Rewards</button>
         </div>
@@ -307,6 +308,22 @@
         </div>
 
         <button type="button" class="menu-btn inbox-footer-back" data-action="close-inbox" data-i18n="back">Back</button>
+      </div>
+    </div>
+
+    <!-- Hangar: 3D plane viewer + flight stats -->
+    <div id="hangar" class="screen hidden">
+      <div class="panel panel-wide hangar-shell">
+        <h2 data-i18n="hangar">Hangar</h2>
+        <p class="panel-desc" data-i18n="hangarDesc">Inspect aircraft, flight stats, and select your plane.</p>
+        <div class="hangar-layout">
+          <nav id="hangar-list" class="hangar-list" role="listbox" aria-label="Aircraft"></nav>
+          <div class="hangar-stage-wrap">
+            <canvas id="hangar-canvas" class="hangar-canvas"></canvas>
+          </div>
+          <div id="hangar-stats" class="hangar-stats"></div>
+        </div>
+        <button type="button" class="menu-btn hangar-footer-back" data-action="close-hangar" data-i18n="back">Back</button>
       </div>
     </div>
 

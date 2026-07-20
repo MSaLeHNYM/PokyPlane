@@ -4926,6 +4926,169 @@ body.touch-ui .nav-back.hidden {
   color: #fbbf24;
 }
 
+/* —— Hangar (plane viewer — mirrors armory) —— */
+.hangar-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.hangar-layout {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.85fr) minmax(0, 1.4fr) minmax(150px, 1fr);
+  gap: 0.8rem;
+  align-items: stretch;
+  min-height: 0;
+  flex: 1;
+}
+
+.hangar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hangar-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 0.5rem 0.65rem;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.82rem;
+  text-align: start;
+}
+
+.hangar-item.active {
+  border-color: var(--accent);
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.hangar-item.equipped {
+  box-shadow: inset 3px 0 0 #4ade80;
+}
+
+.hangar-item-main {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.hangar-item-emoji {
+  font-size: 1.05rem;
+  flex-shrink: 0;
+}
+
+.hangar-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hangar-item-meta {
+  font-size: 0.75rem;
+  color: #93c5fd;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.hangar-stage-wrap {
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: radial-gradient(ellipse at 50% 42%, rgba(48, 88, 128, 0.55), rgba(8, 20, 34, 0.9));
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.hangar-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hangar-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hangar-stats-title {
+  margin: 0 0 0.15rem;
+  font-size: 1rem;
+}
+
+.hangar-stats-desc {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.hangar-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  padding: 0.18rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.hangar-stat-row:last-child {
+  border-bottom: none;
+}
+
+.hangar-stat-label {
+  color: var(--muted);
+}
+
+.hangar-stat-value {
+  font-weight: 800;
+  text-align: end;
+}
+
+.hangar-tag .hangar-stat-value {
+  color: #93c5fd;
+}
+
+.hangar-equipped .hangar-stat-value {
+  color: #4ade80;
+}
+
+.hangar-rate {
+  display: inline-block;
+  width: 2.8rem;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-inline-end: 0.25rem;
+}
+
+.hangar-rate-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #60a5fa, #4ade80);
+  border-radius: 3px;
+}
+
 /* —— Rewards (daily / wheel / market) —— */
 .rewards-shell {
   display: flex;
@@ -5044,6 +5207,7 @@ body.touch-ui .nav-back.hidden {
 /* Armory + Rewards fit-shell: touch landscape (no outer scroll) */
 @media (orientation: landscape) {
   body.touch-ui #armory .panel.armory-shell,
+  body.touch-ui #hangar .panel.hangar-shell,
   body.touch-ui #rewards .panel.rewards-shell {
     width: min(100%, 1100px);
     height: calc(100dvh - 0.8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
@@ -5058,6 +5222,7 @@ body.touch-ui .nav-back.hidden {
   }
 
   body.touch-ui #armory .panel.armory-shell > h2,
+  body.touch-ui #hangar .panel.hangar-shell > h2,
   body.touch-ui #rewards .rewards-head h2 {
     font-size: clamp(1rem, 2.1vh, 1.3rem);
     margin: 0;
@@ -5066,6 +5231,8 @@ body.touch-ui .nav-back.hidden {
 
   body.touch-ui #armory .panel-desc,
   body.touch-ui #armory .armory-footer-back,
+  body.touch-ui #hangar .panel-desc,
+  body.touch-ui #hangar .hangar-footer-back,
   body.touch-ui #rewards .rewards-footer-back {
     display: none;
   }
@@ -5075,7 +5242,13 @@ body.touch-ui .nav-back.hidden {
     gap: 0.5rem;
   }
 
-  body.touch-ui #armory .armory-stage-wrap {
+  body.touch-ui #hangar .hangar-layout {
+    grid-template-columns: minmax(110px, 0.75fr) minmax(0, 1.3fr) minmax(140px, 1fr);
+    gap: 0.5rem;
+  }
+
+  body.touch-ui #armory .armory-stage-wrap,
+  body.touch-ui #hangar .hangar-stage-wrap {
     min-height: 0;
   }
 
@@ -5093,6 +5266,7 @@ body.touch-ui .nav-back.hidden {
 
 /* Desktop fit-shell */
 body:not(.touch-ui) #armory .panel,
+body:not(.touch-ui) #hangar .panel,
 body:not(.touch-ui) #rewards .panel {
   width: min(94vw, 900px);
   max-height: 88vh;

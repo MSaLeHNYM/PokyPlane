@@ -60,6 +60,7 @@ import {
 import { setupPushNotifications } from './pushNotify.js';
 import { refreshEconomy, ammoFromState, getEconomyState } from './economy.js';
 import { setupArmoryUI, openArmory, closeArmory } from './armoryUi.js';
+import { setupHangarUI, openHangar, closeHangar } from './hangarUi.js';
 import { FlareSystem, ManeuverSystem, DODGE_COOLDOWN, REVERSE_COOLDOWN } from './abilities.js';
 import { setupEconomyUI, openRewards, closeRewards } from './economyUi.js';
 import {
@@ -280,6 +281,7 @@ const resultsEl = document.getElementById('results');
 const mpEl = document.getElementById('multiplayer');
 const inboxEl = document.getElementById('inbox');
 const armoryEl = document.getElementById('armory');
+const hangarEl = document.getElementById('hangar');
 const rewardsEl = document.getElementById('rewards');
 const fpsEl = document.getElementById('fps-counter');
 const announceEl = document.getElementById('announce-banner');
@@ -333,12 +335,13 @@ function syncNavBack() {
   const onResults = !resultsEl?.classList.contains('hidden');
   const onInbox = !inboxEl?.classList.contains('hidden');
   const onArmory = !armoryEl?.classList.contains('hidden');
+  const onHangar = !hangarEl?.classList.contains('hidden');
   const onRewards = !rewardsEl?.classList.contains('hidden');
   const hostModal = !document.getElementById('mp-host-modal')?.classList.contains('hidden');
   const inviteModal = !document.getElementById('mp-invite-friend-modal')?.classList.contains('hidden');
   const visible =
     input.isTouchUi &&
-    (onOptions || onMp || onPause || onResults || onInbox || onArmory || onRewards || hostModal || inviteModal) &&
+    (onOptions || onMp || onPause || onResults || onInbox || onArmory || onHangar || onRewards || hostModal || inviteModal) &&
     state !== 'playing';
   btn.classList.toggle('hidden', !visible);
 }
@@ -364,7 +367,7 @@ function navigateBack() {
     showScreen('menu');
     return;
   }
-  if (!armoryEl?.classList.contains('hidden') || !rewardsEl?.classList.contains('hidden')) {
+  if (!armoryEl?.classList.contains('hidden') || !hangarEl?.classList.contains('hidden') || !rewardsEl?.classList.contains('hidden')) {
     showScreen('menu');
     return;
   }
@@ -394,7 +397,7 @@ function navigateBack() {
 }
 
 function showScreen(id) {
-  [menuEl, optionsEl, pauseEl, resultsEl, mpEl, inboxEl, armoryEl, rewardsEl].forEach((el) =>
+  [menuEl, optionsEl, pauseEl, resultsEl, mpEl, inboxEl, armoryEl, hangarEl, rewardsEl].forEach((el) =>
     el?.classList.add('hidden')
   );
   if (id === 'menu') menuEl?.classList.remove('hidden');
@@ -422,6 +425,12 @@ function showScreen(id) {
     openArmory();
   } else {
     closeArmory();
+  }
+  if (id === 'hangar') {
+    hangarEl?.classList.remove('hidden');
+    openHangar();
+  } else {
+    closeHangar();
   }
   if (id === 'rewards') {
     rewardsEl?.classList.remove('hidden');
@@ -2176,6 +2185,14 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
       showScreen('menu');
       return;
     }
+    if (action === 'hangar') {
+      showScreen('hangar');
+      return;
+    }
+    if (action === 'close-hangar') {
+      showScreen('menu');
+      return;
+    }
     if (action === 'armory') {
       showScreen('armory');
       return;
@@ -2491,6 +2508,10 @@ scene.background = new THREE.Color(0x143a5c);
   setupPushNotifications();
   setupInboxUI();
   setupArmoryUI();
+  setupHangarUI({
+    getSelectedPlane: () => planeTypeIndex,
+    selectPlane: (index) => selectPlane(index),
+  });
   setupEconomyUI({ toast: (msg) => hud.toast(msg, 2600) });
   refreshEconomy();
   setInboxJoinLobbyHandler((roomId) => {

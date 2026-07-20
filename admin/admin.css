@@ -337,3 +337,21 @@ th, td {
   font-size: 0.82rem;
   margin: 0;
 }
+
+/* Rewards / grants */
+.grant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.6rem;
+}
+
+.grant-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.grant-grid input {
+  width: 100%;
+}

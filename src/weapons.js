@@ -88,6 +88,9 @@ export class WeaponSystem {
     this.cooldown = 0;
     this.activeId = 'mg';
     this.enabled = { ...DEFAULT_WEAPON_FLAGS };
+    // MG is always infinite; the rest come from the player's inventory.
+    this.ammo = { mg: Infinity, cannon: Infinity, rocket: Infinity, missile: Infinity };
+    this.ammoUsed = { cannon: 0, rocket: 0, missile: 0 };
 
     this._mats = {};
     this._geos = {};
@@ -110,6 +113,25 @@ export class WeaponSystem {
 
   get active() {
     return WEAPON_DEFS[this.activeId] || WEAPON_DEFS.mg;
+  }
+
+  /** Seed ammo counts (MG stays infinite). */
+  setAmmo({ cannon, rocket, missile } = {}) {
+    if (cannon != null) this.ammo.cannon = Math.max(0, Math.floor(cannon));
+    if (rocket != null) this.ammo.rocket = Math.max(0, Math.floor(rocket));
+    if (missile != null) this.ammo.missile = Math.max(0, Math.floor(missile));
+  }
+
+  getAmmo(id = this.activeId) {
+    return this.ammo[id] ?? 0;
+  }
+
+  hasAmmo(id = this.activeId) {
+    return (this.ammo[id] ?? 0) > 0;
+  }
+
+  resetAmmoUsed() {
+    this.ammoUsed = { cannon: 0, rocket: 0, missile: 0 };
   }
 
   setEnabled(flags = {}) {
@@ -148,7 +170,7 @@ export class WeaponSystem {
   }
 
   canFire() {
-    return this.cooldown <= 0 && !!this.enabled[this.activeId];
+    return this.cooldown <= 0 && !!this.enabled[this.activeId] && this.hasAmmo(this.activeId);
   }
 
   /**
@@ -161,6 +183,10 @@ export class WeaponSystem {
       if (!this.enabled[weaponId]) return null;
       if (!this.canFire()) return null;
       this.cooldown = opts.rate ?? def.fireRate;
+      if (Number.isFinite(this.ammo[weaponId])) {
+        this.ammo[weaponId] = Math.max(0, this.ammo[weaponId] - 1);
+        if (weaponId in this.ammoUsed) this.ammoUsed[weaponId] += 1;
+      }
     } else if (opts.rate != null) {
       // Remote/replay fire: skip gate but only touch cooldown when rate is set.
       this.cooldown = opts.rate;

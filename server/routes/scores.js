@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { authMiddleware, optionalAuth } from '../middleware/auth.js';
 import { COUNTRIES, PROFILE_AVATARS } from '../config.js';
+import { awardMatchCoins, spendAmmo } from '../models/economy.js';
 
 const router = Router();
 
@@ -33,7 +34,19 @@ router.post('/submit', authMiddleware, async (req, res, next) => {
       ]
     );
 
-    res.status(201).json({ score: rows[0] });
+    // Economy: reconcile ammo spent during the match, then award coins.
+    let coinsEarned = 0;
+    try {
+      const ammoUsed = metadata?.ammoUsed;
+      if (ammoUsed && typeof ammoUsed === 'object') {
+        await spendAmmo(req.auth.userId, ammoUsed);
+      }
+      coinsEarned = await awardMatchCoins(req.auth.userId, mode, score, flightTimeSec);
+    } catch (econErr) {
+      console.error('[scores] economy update failed', econErr);
+    }
+
+    res.status(201).json({ score: rows[0], coinsEarned });
   } catch (e) {
     next(e);
   }

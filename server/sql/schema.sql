@@ -172,3 +172,38 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_push_subs_user
   ON push_subscriptions (user_id);
+
+-- Economy: coins, ammo inventory, daily claims, audit log
+CREATE TABLE IF NOT EXISTS user_wallets (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  coins BIGINT NOT NULL DEFAULT 0 CHECK (coins >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_inventory (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_key VARCHAR(32) NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 0 CHECK (qty >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, item_key)
+);
+
+CREATE TABLE IF NOT EXISTS daily_claims (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  day DATE NOT NULL,
+  kind VARCHAR(24) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, day, kind)
+);
+
+CREATE TABLE IF NOT EXISTS economy_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  delta JSONB NOT NULL DEFAULT '{}',
+  reason VARCHAR(48) NOT NULL,
+  actor UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_economy_log_user
+  ON economy_log (user_id, created_at DESC);

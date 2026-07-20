@@ -27,6 +27,9 @@ export class Input {
       camera: false,
       pause: false,
       weaponCycle: false,
+      flare: false,
+      dodge: false,
+      reverse: false,
     };
     this._mouseDown = false;
     this._mouseLockDown = false;
@@ -36,6 +39,12 @@ export class Input {
     this.lockHeld = false;
     this.weaponSlot = null;
     this.weaponCycle = false;
+    this.flarePressed = false;
+    this.dodgePressed = false;
+    this.reversePressed = false;
+    this._flareLatch = false;
+    this._dodgeLatch = false;
+    this._reverseLatch = false;
     this._camLatch = false;
     this._pauseLatch = false;
     this._fireLatch = false;
@@ -101,6 +110,9 @@ export class Input {
     this.touch.camera = false;
     this.touch.pause = false;
     this.touch.weaponCycle = false;
+    this.touch.flare = false;
+    this.touch.dodge = false;
+    this.touch.reverse = false;
     const knob = document.querySelector('#stick-move .stick-knob');
     if (knob) knob.style.transform = 'translate(-50%, -50%)';
   }
@@ -205,6 +217,9 @@ export class Input {
     hold(document.getElementById('touch-camera'), 'camera');
     hold(document.getElementById('touch-pause'), 'pause');
     hold(document.getElementById('touch-weapon'), 'weaponCycle');
+    hold(document.getElementById('touch-flare'), 'flare');
+    hold(document.getElementById('touch-dodge'), 'dodge');
+    hold(document.getElementById('touch-reverse'), 'reverse');
   }
 
   setMouseLook(on) {
@@ -244,6 +259,18 @@ export class Input {
     const wpnCycle = !!this.touch.weaponCycle;
     this.weaponCycle = wpnCycle && !this._wpnCycleLatch;
     this._wpnCycleLatch = wpnCycle;
+
+    const flare = this._any('flare') || this.touch.flare;
+    this.flarePressed = flare && !this._flareLatch;
+    this._flareLatch = flare;
+
+    const dodge = this._any('dodge') || this.touch.dodge;
+    this.dodgePressed = dodge && !this._dodgeLatch;
+    this._dodgeLatch = dodge;
+
+    const reverse = this._any('quickTurn') || this.touch.reverse;
+    this.reversePressed = reverse && !this._reverseLatch;
+    this._reverseLatch = reverse;
   }
 
   getFlightInput() {

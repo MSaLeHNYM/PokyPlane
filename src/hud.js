@@ -98,6 +98,7 @@ export class HUD {
       this.els.heading.textContent = CARDINALS[idx];
     }
     if (this.els.weapon && weaponLabel) this.els.weapon.textContent = weaponLabel;
+    if (this.els.weapon) this.els.weapon.classList.toggle('ammo-empty', !!state.weaponEmpty);
     if (this.els.throttle) this.els.throttle.style.height = `${throttle * 100}%`;
     if (this.els.fuelWrap) {
       this.els.fuelWrap.classList.toggle('hidden', !fuelLimit);
@@ -290,11 +291,8 @@ export class HUD {
     ctx.arc(cx, cy, radius - dpr, 0, Math.PI * 2);
     ctx.clip();
     ctx.translate(cx, cy);
-    // Heading-up: rotate world so aircraft forward is always screen-up.
-    // Canvas Y-down: use -heading (same sign as prior north-up icon fix).
-    ctx.rotate(-headingRad);
 
-    // Range rings
+    // Range rings + cross grid: screen-fixed (drawn before the heading rotation)
     ctx.lineWidth = lw(1);
     for (const frac of [0.25, 0.5, 0.75, 1]) {
       ctx.beginPath();
@@ -303,8 +301,6 @@ export class HUD {
         frac === 1 ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)';
       ctx.stroke();
     }
-
-    // Cross grid (aligned to aircraft axes in heading-up)
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     ctx.beginPath();
     ctx.moveTo(-radius, 0);
@@ -312,6 +308,10 @@ export class HUD {
     ctx.moveTo(0, -radius);
     ctx.lineTo(0, radius);
     ctx.stroke();
+
+    // Heading-up: rotate world so aircraft forward is always screen-up.
+    // Canvas Y-down: use -heading (same sign as prior north-up icon fix).
+    ctx.rotate(-headingRad);
 
     // World-origin / territory circle (relative to player)
     const origin = toRadar(0, 0);
@@ -326,6 +326,7 @@ export class HUD {
     }
 
     // Blips — inside radar or clamped to rim for long range
+    const blipLabels = [];
     for (const m of markers) {
       const p = toRadar(m.x, m.z);
       const dist = Math.hypot(p.x, p.y);
@@ -369,19 +370,25 @@ export class HUD {
         }
       }
 
-      if (m.kind === 'enemy' && (inside || m.locked)) {
-        const label = m.dist != null ? `${Math.round(m.dist)}` : '';
-        if (label) {
-          ctx.fillStyle = 'rgba(255,255,255,0.75)';
-          ctx.font = font(8);
-          ctx.textAlign = 'center';
-          ctx.fillText(label, px, pz - dotR - 3 * dpr);
-        }
+      if ((m.kind === 'enemy' || m.kind === 'peer') && (inside || m.locked) && m.dist != null) {
+        blipLabels.push({ x: px, y: pz, r: dotR, text: `${Math.round(m.dist)}` });
       }
     }
 
     // Un-rotate for fixed nose-up player icon (always points toward top of radar)
     ctx.rotate(headingRad);
+
+    // Distance labels drawn upright: map rotated-frame coords to the fixed frame.
+    const cosH = Math.cos(headingRad);
+    const sinH = Math.sin(headingRad);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.font = font(8);
+    ctx.textAlign = 'center';
+    for (const l of blipLabels) {
+      const sx = l.x * cosH + l.y * sinH;
+      const sy = -l.x * sinH + l.y * cosH;
+      ctx.fillText(l.text, sx, sy - l.r - 3 * dpr);
+    }
     ctx.fillStyle = '#94a3b8';
     ctx.fillRect(-2 * dpr, -2 * dpr, 4 * dpr, 10 * dpr);
     ctx.fillStyle = '#ffe08a';
@@ -394,25 +401,38 @@ export class HUD {
 
     ctx.restore();
 
-    // Compass rose — North moves opposite heading so it stays world-correct
+    // Compass rose — North sits on the rim, opposite heading, arrow pointing outward
     const nAng = -headingRad - Math.PI / 2;
-    const nR = 13 * dpr;
+    const nR = radius - 7 * dpr;
     const nx = cx + Math.cos(nAng) * nR;
     const ny = cy + Math.sin(nAng) * nR;
+    ctx.save();
+    ctx.translate(nx, ny);
+    ctx.rotate(nAng + Math.PI / 2);
     ctx.fillStyle = '#ff6b4a';
     ctx.beginPath();
-    ctx.moveTo(nx, ny - 6 * dpr);
-    ctx.lineTo(nx - 4 * dpr, ny + 4 * dpr);
-    ctx.lineTo(nx + 4 * dpr, ny + 4 * dpr);
+    ctx.moveTo(0, -5 * dpr);
+    ctx.lineTo(-4 * dpr, 4 * dpr);
+    ctx.lineTo(4 * dpr, 4 * dpr);
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
+    // Upright letter pulled toward the center of the dial
+    const lR = radius - 19 * dpr;
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.font = font(9);
     ctx.textAlign = 'center';
-    ctx.fillText('N', nx, ny + 14 * dpr);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('N', cx + Math.cos(nAng) * lR, cy + Math.sin(nAng) * lR);
+    ctx.textBaseline = 'alphabetic';
 
+    const rangeText =
+      radarRange >= 1000
+        ? `${(Math.round(radarRange / 100) / 10).toFixed(1)}km`
+        : `${Math.round(radarRange)}m`;
     ctx.fillStyle = 'rgba(147, 197, 253, 0.85)';
     ctx.font = font(8);
-    ctx.fillText(`${Math.round(radarRange / 100) / 10}km`, cx, h - 6 * dpr);
+    ctx.textAlign = 'center';
+    ctx.fillText(rangeText, cx, h - 6 * dpr);
   }
 }

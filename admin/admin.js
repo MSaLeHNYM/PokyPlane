@@ -463,6 +463,62 @@ document.getElementById('push-form')?.addEventListener('submit', async (e) => {
   }
 });
 
+/* —— Rewards / grants —— */
+function showGrantStatus(msg, ok = true) {
+  const el = document.getElementById('grant-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('hidden', 'ok', 'error');
+  el.classList.add(ok ? 'ok' : 'error');
+}
+
+document.querySelectorAll('input[name="grant-mode"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    const mode = document.querySelector('input[name="grant-mode"]:checked')?.value || 'single';
+    document.getElementById('grant-users-wrap')?.classList.toggle('hidden', mode === 'all');
+  });
+});
+
+document.getElementById('grant-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const mode = document.querySelector('input[name="grant-mode"]:checked')?.value || 'single';
+    const n = (id) => Math.max(0, Math.floor(Number(document.getElementById(id)?.value) || 0));
+    const body = {
+      coins: n('grant-coins'),
+      items: {
+        ammo_cannon: n('grant-cannon'),
+        ammo_rocket: n('grant-rocket'),
+        ammo_missile: n('grant-missile'),
+        wheel_spin: n('grant-spins'),
+      },
+      notify: !!document.getElementById('grant-notify')?.checked,
+    };
+    if (mode === 'all') {
+      body.all = true;
+    } else {
+      const raw = document.getElementById('grant-user-ids')?.value || '';
+      const ids = raw
+        .split(/[\s,;]+/)
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (!ids.length) {
+        showGrantStatus('Enter at least one user ID.', false);
+        return;
+      }
+      if (mode === 'single' && ids.length > 1) {
+        showGrantStatus('Single mode: enter exactly one user ID (or pick Multiple).', false);
+        return;
+      }
+      body.userIds = ids;
+    }
+    const data = await api('/admin/grant', { method: 'POST', body });
+    showGrantStatus(`Granted to ${data.granted} user(s).`, true);
+  } catch (ex) {
+    showGrantStatus(ex.message || 'Grant failed.', false);
+  }
+});
+
 document.getElementById('inbox-recent-select-all')?.addEventListener('change', (e) => {
   const on = !!e.target.checked;
   const rows = filteredInboxRecent();

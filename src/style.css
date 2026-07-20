@@ -583,6 +583,74 @@ body.touch-ui #menu.screen {
   fill: rgba(85, 232, 160, 0.95);
 }
 
+/* Per-weapon crosshair shapes — only the missile gets a lock-on reticle */
+.reticle-diamond,
+.reticle-lock-arc {
+  display: none;
+  fill: none;
+  stroke: rgba(85, 232, 160, 0.95);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* MG: light cross + dot */
+.target-reticle.wpn-mg .reticle-bracket,
+.target-reticle.wpn-mg .reticle-ring {
+  display: none;
+}
+
+/* Cannon: ring + cross (no corner brackets) */
+.target-reticle.wpn-cannon .reticle-bracket {
+  display: none;
+}
+
+/* Rocket: corner brackets + dot (no ring) */
+.target-reticle.wpn-rocket .reticle-ring {
+  display: none;
+}
+
+/* Missile: lock diamond + brackets; acquire arc sweeps while locking */
+.target-reticle.wpn-missile .reticle-ring,
+.target-reticle.wpn-missile .reticle-line {
+  display: none;
+}
+
+.target-reticle.wpn-missile .reticle-diamond {
+  display: block;
+  transform-origin: 24px 24px;
+  opacity: 0.85;
+}
+
+.target-reticle.wpn-missile.locked .reticle-lock-arc {
+  display: block;
+  transform: rotate(-90deg);
+  transform-origin: 24px 24px;
+  stroke-dasharray: calc(var(--acquire, 0) * 100) 100;
+  opacity: 0.9;
+}
+
+.target-reticle.wpn-missile.hard-locked .reticle-diamond {
+  stroke: #55e8a0;
+  opacity: 1;
+  animation: lock-diamond-spin 1.4s linear infinite;
+}
+
+.target-reticle.wpn-missile.hard-locked .reticle-lock-arc {
+  stroke-dasharray: none;
+  animation: lock-pulse 0.8s ease-in-out infinite;
+  transform-origin: 24px 24px;
+}
+
+@keyframes lock-diamond-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(90deg);
+  }
+}
+
 .target-reticle.wpn-missile.locked .reticle-line,
 .target-reticle.wpn-missile.locked .reticle-bracket,
 .target-reticle.wpn-missile.locked .reticle-ring {
@@ -4710,3 +4778,350 @@ body.touch-ui .nav-back.hidden {
 }
 
 /* modals */
+
+/* —— Economy: coins chip, menu row —— */
+.menu-economy-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.coins-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  color: #fbbf24;
+  font-weight: 800;
+  font-size: 0.82rem;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  white-space: nowrap;
+}
+
+/* —— HUD ammo —— */
+#hud-weapon.ammo-empty {
+  color: #f87171;
+  animation: ammo-empty-flash 0.9s ease-in-out infinite;
+}
+
+@keyframes ammo-empty-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* —— Armory —— */
+.armory-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.armory-layout {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(0, 1.4fr) minmax(150px, 1fr);
+  gap: 0.8rem;
+  align-items: stretch;
+  min-height: 0;
+  flex: 1;
+}
+
+.armory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.armory-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-align: start;
+}
+
+.armory-item.active {
+  border-color: var(--accent);
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.armory-item-ammo {
+  font-size: 0.78rem;
+  color: #fbbf24;
+  font-weight: 800;
+}
+
+.armory-stage-wrap {
+  position: relative;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: radial-gradient(ellipse at 50% 42%, rgba(48, 88, 128, 0.55), rgba(8, 20, 34, 0.9));
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.armory-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.armory-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.armory-stats-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.02rem;
+}
+
+.armory-stat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  padding: 0.22rem 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.armory-stat-label {
+  color: var(--text-dim, rgba(255, 255, 255, 0.65));
+}
+
+.armory-stat-value {
+  font-weight: 800;
+}
+
+.armory-owned .armory-stat-value {
+  color: #fbbf24;
+}
+
+/* —— Rewards (daily / wheel / market) —— */
+.rewards-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.rewards-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.rewards-head h2 {
+  margin: 0;
+}
+
+.rewards-tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin: 0.55rem 0;
+}
+
+.rewards-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.rewards-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.4rem 0;
+}
+
+.daily-reward-card {
+  background: linear-gradient(150deg, rgba(96, 165, 250, 0.18), rgba(16, 32, 52, 0.6));
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 14px;
+  padding: 1rem 1.3rem;
+  text-align: center;
+  min-width: min(320px, 80%);
+}
+
+.daily-reward-items {
+  font-weight: 800;
+  font-size: 1rem;
+  color: #fbbf24;
+}
+
+.wheel-wrap {
+  position: relative;
+  width: min(280px, 62vmin);
+  aspect-ratio: 1;
+}
+
+#wheel-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  will-change: transform;
+}
+
+.wheel-pointer {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-top: 20px solid #fbbf24;
+  z-index: 2;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
+}
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.market-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 0.75rem 0.6rem;
+  text-align: center;
+}
+
+.market-card-name {
+  font-weight: 700;
+  font-size: 0.85rem;
+  min-height: 2.2em;
+}
+
+.market-card-price {
+  color: #fbbf24;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+/* Armory + Rewards fit-shell: touch landscape (no outer scroll) */
+@media (orientation: landscape) {
+  body.touch-ui #armory .panel.armory-shell,
+  body.touch-ui #rewards .panel.rewards-shell {
+    width: min(100%, 1100px);
+    height: calc(100dvh - 0.8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 0.8rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    margin: 0 auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0.55rem 0.85rem 0.6rem;
+    gap: 0.35rem;
+    box-sizing: border-box;
+  }
+
+  body.touch-ui #armory .panel.armory-shell > h2,
+  body.touch-ui #rewards .rewards-head h2 {
+    font-size: clamp(1rem, 2.1vh, 1.3rem);
+    margin: 0;
+    padding-inline-start: 2.75rem;
+  }
+
+  body.touch-ui #armory .panel-desc,
+  body.touch-ui #armory .armory-footer-back,
+  body.touch-ui #rewards .rewards-footer-back {
+    display: none;
+  }
+
+  body.touch-ui #armory .armory-layout {
+    grid-template-columns: minmax(110px, 0.7fr) minmax(0, 1.3fr) minmax(140px, 1fr);
+    gap: 0.5rem;
+  }
+
+  body.touch-ui #armory .armory-stage-wrap {
+    min-height: 0;
+  }
+
+  body.touch-ui #rewards .rewards-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.touch-ui #rewards .wheel-wrap {
+    width: min(200px, 42vmin);
+  }
+}
+
+/* Desktop fit-shell */
+body:not(.touch-ui) #armory .panel,
+body:not(.touch-ui) #rewards .panel {
+  width: min(94vw, 900px);
+  max-height: 88vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* —— Ability buttons (flare / dodge / reverse) —— */
+.touch-btn.ability-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.touch-btn.ability-btn.cooling {
+  opacity: 0.6;
+}
+
+.touch-btn.ability-btn.cooling::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(rgba(0, 0, 0, 0.6) calc(var(--cd, 0) * 360deg), transparent 0);
+  pointer-events: none;
+}
+
+.hud-abilities-gauge .gauge-value {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}

@@ -18,6 +18,7 @@ import mpRoutes from './routes/mp.js';
 import friendsRoutes from './routes/friends.js';
 import inboxRoutes from './routes/inbox.js';
 import pushRoutes from './routes/push.js';
+import economyRoutes from './routes/economy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -55,6 +56,7 @@ app.use('/api/announcement', announcementRoutes);
 app.use('/api/friends', friendsRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/push', pushRoutes);
+app.use('/api/economy', economyRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/mp', mpRoutes);
 

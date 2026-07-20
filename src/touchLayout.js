@@ -12,6 +12,9 @@ export const TOUCH_CONTROL_IDS = [
   'boost',
   'throttle',
   'fire',
+  'flare',
+  'dodge',
+  'reverse',
 ];
 
 /** Sensible landscape defaults (center % + scale). Used when seeding the editor. */
@@ -24,6 +27,9 @@ export const DEFAULT_TOUCH_LAYOUT = {
   boost: { x: 90, y: 68, size: 1 },
   throttle: { x: 78, y: 82, size: 1 },
   fire: { x: 90, y: 82, size: 1 },
+  flare: { x: 66, y: 82, size: 1 },
+  dodge: { x: 66, y: 68, size: 1 },
+  reverse: { x: 66, y: 56, size: 1 },
 };
 
 const SELECTORS = {
@@ -35,6 +41,9 @@ const SELECTORS = {
   boost: '#touch-boost',
   throttle: '#touch-throttle',
   fire: '#touch-fire',
+  flare: '#touch-flare',
+  dodge: '#touch-dodge',
+  reverse: '#touch-reverse',
 };
 
 let editing = false;

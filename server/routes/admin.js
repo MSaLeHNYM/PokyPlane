@@ -26,6 +26,7 @@ import {
   isPushConfigured,
   ensurePushConfigured,
 } from '../models/push.js';
+import { grantToUsers, ITEM_KEYS } from '../models/economy.js';
 
 const router = Router();
 
@@ -341,6 +342,96 @@ router.post('/inbox', async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+/**
+ * Grant coins / ammo / wheel spins to one user, a list of users, or everyone.
+ * body: { userIds?: string[] | null (null/empty + all:true → all users),
+ *         all?: boolean, coins?: number, items?: {ammo_cannon, ammo_rocket, ammo_missile, wheel_spin},
+ *         notify?: boolean }
+ */
+router.post('/grant', async (req, res, next) => {
+  try {
+    const { userIds, all, coins, items, notify } = req.body || {};
+    let targets = null;
+    if (!all) {
+      const list = (Array.isArray(userIds) ? userIds : [userIds])
+        .map((v) => String(v || '').trim())
+        .filter(Boolean);
+      if (!list.length) {
+        return res.status(400).json({
+          error: 'validation',
+          message: 'userIds required (or set all: true).',
+        });
+      }
+      targets = list;
+    }
+
+    const result = await grantToUsers({
+      userIds: targets,
+      coins,
+      items,
+      actor: req.auth.userId,
+    });
+
+    // Optional inbox note so recipients see what they received.
+    if (notify !== false) {
+      const parts = [];
+      if (result.grant.coins) parts.push(`${result.grant.coins} coins`);
+      for (const [key, qty] of Object.entries(result.grant.items)) {
+        const label =
+          key === 'ammo_cannon'
+            ? 'cannon ammo'
+            : key === 'ammo_rocket'
+              ? 'rockets'
+              : key === 'ammo_missile'
+                ? 'missiles'
+                : 'wheel spins';
+        parts.push(`${qty} ${label}`);
+      }
+      const title = 'You received a gift!';
+      const body = `An admin sent you: ${parts.join(', ')}.`;
+      const batchId = randomUUID();
+      const notifyTargets =
+        targets ||
+        (await query(`SELECT id FROM users WHERE is_banned = FALSE`)).rows.map((r) => r.id);
+      for (const uid of notifyTargets) {
+        try {
+          await createInboxMessage({
+            userId: uid,
+            kind: 'admin',
+            title,
+            body,
+            fromUserId: req.auth.userId,
+            fromLabel: 'Admin',
+            allowDelete: true,
+            payload: { grant: true, batchId },
+          });
+        } catch {
+          /* unknown user id — grant already skipped it too */
+        }
+      }
+    }
+
+    await logSecurityEvent('admin_grant', {
+      userId: req.auth.userId,
+      ip: getClientIp(req),
+      details: {
+        targets: targets ? targets.length : 'all',
+        granted: result.granted,
+        grant: result.grant,
+      },
+    });
+
+    res.json({ ok: true, granted: result.granted, grant: result.grant });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.code || 'error', message: e.message });
+    next(e);
+  }
+});
+
+router.get('/grant/item-keys', (_req, res) => {
+  res.json({ itemKeys: ITEM_KEYS });
 });
 
 router.get('/inbox/recent', async (req, res, next) => {

@@ -60,6 +60,8 @@
           <line class="reticle-bracket" x1="40" y1="40" x2="40" y2="34" />
           <line class="reticle-bracket" x1="40" y1="40" x2="34" y2="40" />
           <circle class="reticle-dot" cx="24" cy="24" r="2.2" />
+          <polygon class="reticle-diamond" points="24,6 42,24 24,42 6,24" />
+          <circle class="reticle-lock-arc" cx="24" cy="24" r="20" pathLength="100" />
         </svg>
         <div class="reticle-range"></div>
       </div>
@@ -87,6 +89,10 @@
         <div class="gauge hud-weapon-gauge">
           <div class="gauge-label" data-i18n="weapon">WPN</div>
           <div class="gauge-value" id="hud-weapon">MG</div>
+        </div>
+        <div class="gauge hud-abilities-gauge">
+          <div class="gauge-label" data-i18n="abilities">ABL</div>
+          <div class="gauge-value" id="hud-abilities"></div>
         </div>
         <div class="health-wrap">
           <div class="health-label" data-i18n="hp">HP</div>
@@ -181,6 +187,11 @@
           <button type="button" class="menu-btn" data-action="multiplayer" data-i18n="multiplayer">Multiplayer</button>
           <button type="button" class="menu-btn" data-action="options" data-i18n="settings">Settings</button>
         </nav>
+        <div class="menu-economy-row" id="menu-economy-row">
+          <span id="coins-chip" class="coins-chip hidden" title="Coins">🪙 <span id="coins-chip-value">0</span></span>
+          <button type="button" class="menu-btn menu-btn-sm" data-action="armory" data-i18n="armory">Armory</button>
+          <button type="button" class="menu-btn menu-btn-sm" id="btn-rewards" data-action="rewards" data-i18n="rewards">Rewards</button>
+        </div>
         <div class="menu-account-row hidden" id="menu-account-row">
           <button type="button" class="menu-btn menu-btn-sm btn-inbox" id="btn-inbox">
             <span data-i18n="inbox">Inbox</span>
@@ -296,6 +307,57 @@
         </div>
 
         <button type="button" class="menu-btn inbox-footer-back" data-action="close-inbox" data-i18n="back">Back</button>
+      </div>
+    </div>
+
+    <!-- Armory: 3D weapon viewer + stats -->
+    <div id="armory" class="screen hidden">
+      <div class="panel panel-wide armory-shell">
+        <h2 data-i18n="armory">Armory</h2>
+        <p class="panel-desc" data-i18n="armoryDesc">Inspect your weapons, stats, and remaining ammo.</p>
+        <div class="armory-layout">
+          <nav id="armory-list" class="armory-list" role="listbox" aria-label="Weapons"></nav>
+          <div class="armory-stage-wrap">
+            <canvas id="armory-canvas" class="armory-canvas"></canvas>
+          </div>
+          <div id="armory-stats" class="armory-stats"></div>
+        </div>
+        <button type="button" class="menu-btn armory-footer-back" data-action="close-armory" data-i18n="back">Back</button>
+      </div>
+    </div>
+
+    <!-- Rewards: daily, wheel of luck, marketplace -->
+    <div id="rewards" class="screen hidden">
+      <div class="panel panel-wide rewards-shell">
+        <div class="rewards-head">
+          <h2 data-i18n="rewards">Rewards</h2>
+          <span class="coins-chip">🪙 <span id="rewards-coins">0</span></span>
+        </div>
+        <div class="rewards-tabs" role="tablist">
+          <button type="button" class="sb-tab active" data-rewards-tab="daily" data-i18n="dailyReward">Daily Reward</button>
+          <button type="button" class="sb-tab" data-rewards-tab="wheel" data-i18n="wheelOfLuck">Wheel of Luck</button>
+          <button type="button" class="sb-tab" data-rewards-tab="market" data-i18n="marketplace">Marketplace</button>
+        </div>
+        <div class="rewards-body modal-scroll">
+          <section id="rewards-daily" class="rewards-tab">
+            <div id="daily-reward-card" class="daily-reward-card"></div>
+            <button type="button" class="menu-btn primary" id="daily-claim-btn" data-i18n="claimReward">Claim reward</button>
+            <p id="daily-status" class="hint"></p>
+          </section>
+          <section id="rewards-wheel" class="rewards-tab hidden">
+            <div class="wheel-wrap">
+              <div class="wheel-pointer" aria-hidden="true"></div>
+              <canvas id="wheel-canvas" width="400" height="400"></canvas>
+            </div>
+            <button type="button" class="menu-btn primary" id="wheel-spin-btn">Spin</button>
+            <p id="wheel-status" class="hint"></p>
+          </section>
+          <section id="rewards-market" class="rewards-tab hidden">
+            <div id="market-grid" class="market-grid"></div>
+            <p id="market-status" class="hint"></p>
+          </section>
+        </div>
+        <button type="button" class="menu-btn rewards-footer-back" data-action="close-rewards" data-i18n="back">Back</button>
       </div>
     </div>
 
@@ -568,6 +630,9 @@
                   <div class="keybind-row"><span data-i18n="keyRollLeft">Roll left</span><button type="button" class="keybind-btn" data-bind="rollLeft"></button></div>
                   <div class="keybind-row"><span data-i18n="keyRollRight">Roll right</span><button type="button" class="keybind-btn" data-bind="rollRight"></button></div>
                   <div class="keybind-row"><span data-i18n="keyFire">Fire</span><button type="button" class="keybind-btn" data-bind="fire"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyFlare">Drop flares</span><button type="button" class="keybind-btn" data-bind="flare"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyDodge">Dodge roll</span><button type="button" class="keybind-btn" data-bind="dodge"></button></div>
+                  <div class="keybind-row"><span data-i18n="keyQuickTurn">Quick reverse</span><button type="button" class="keybind-btn" data-bind="quickTurn"></button></div>
                   <div class="keybind-row"><span data-i18n="keyCamera">Cycle camera</span><button type="button" class="keybind-btn" data-bind="camera"></button></div>
                   <div class="keybind-row"><span data-i18n="keyPause">Pause</span><button type="button" class="keybind-btn" data-bind="pause"></button></div>
                 </div>
@@ -645,14 +710,17 @@
       <div class="stick touch-ctrl" id="stick-move" data-touch-id="stick"><div class="stick-knob"></div></div>
       <div class="touch-btns">
         <div class="touch-btn-row">
+          <button type="button" id="touch-reverse" class="touch-btn secondary touch-ctrl ability-btn" data-touch-id="reverse" data-i18n="revBtn">REV</button>
           <button type="button" id="touch-camera" class="touch-btn secondary touch-ctrl" data-touch-id="camera" data-i18n="cam">CAM</button>
           <button type="button" id="touch-weapon" class="touch-btn secondary touch-ctrl" data-touch-id="weapon" data-i18n="wpn">WPN</button>
         </div>
         <div class="touch-btn-row">
+          <button type="button" id="touch-dodge" class="touch-btn secondary touch-ctrl ability-btn" data-touch-id="dodge" data-i18n="dodgeBtn">DGE</button>
           <button type="button" id="touch-brake" class="touch-btn secondary touch-ctrl" data-touch-id="brake" data-i18n="brk">BRK</button>
           <button type="button" id="touch-boost" class="touch-btn boost touch-ctrl" data-touch-id="boost" data-i18n="bst">BST</button>
         </div>
         <div class="touch-btn-row touch-btn-row-main">
+          <button type="button" id="touch-flare" class="touch-btn secondary touch-ctrl ability-btn" data-touch-id="flare" data-i18n="flrBtn">FLR</button>
           <button type="button" id="touch-throttle" class="touch-btn touch-ctrl" data-touch-id="throttle" data-i18n="thr">THR</button>
           <button type="button" id="touch-fire" class="touch-btn fire touch-ctrl" data-touch-id="fire" data-i18n="fire">FIRE</button>
         </div>

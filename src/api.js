@@ -264,3 +264,21 @@ export async function inboxMarkUnread(ids) {
 export async function inboxDelete(ids) {
   return api('/inbox/delete', { method: 'POST', body: { ids } });
 }
+
+/* —— Economy (coins, ammo, daily, wheel, market) —— */
+export async function fetchEconomyState() {
+  if (!isLoggedIn()) return null;
+  return api('/economy/state');
+}
+
+export async function claimDailyReward() {
+  return api('/economy/daily/claim', { method: 'POST' });
+}
+
+export async function spinWheelOfLuck() {
+  return api('/economy/wheel/spin', { method: 'POST' });
+}
+
+export async function buyMarketItem(itemId) {
+  return api('/economy/market/buy', { method: 'POST', body: { itemId } });
+}

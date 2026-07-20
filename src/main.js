@@ -58,6 +58,10 @@ import {
   isTouchMobile,
 } from './pwaGate.js';
 import { setupPushNotifications } from './pushNotify.js';
+import { refreshEconomy, ammoFromState, getEconomyState } from './economy.js';
+import { setupArmoryUI, openArmory, closeArmory } from './armoryUi.js';
+import { FlareSystem, ManeuverSystem, DODGE_COOLDOWN, REVERSE_COOLDOWN } from './abilities.js';
+import { setupEconomyUI, openRewards, closeRewards } from './economyUi.js';
 import {
   applyTouchLayout,
   startTouchLayoutEditor,
@@ -104,6 +108,9 @@ const input = new Input();
 const hud = new HUD();
 const camRig = new CameraManager(camera);
 let weapons = null;
+const maneuvers = new ManeuverSystem();
+/** @type {FlareSystem|null} */
+let playerFlares = null;
 
 let selectedMapId = localStorage.getItem('pokyplane_map') || 'meadow';
 /** Session world seed — regenerated each flight (synced via MP lobby). */
@@ -272,6 +279,8 @@ const pauseEl = document.getElementById('pause');
 const resultsEl = document.getElementById('results');
 const mpEl = document.getElementById('multiplayer');
 const inboxEl = document.getElementById('inbox');
+const armoryEl = document.getElementById('armory');
+const rewardsEl = document.getElementById('rewards');
 const fpsEl = document.getElementById('fps-counter');
 const announceEl = document.getElementById('announce-banner');
 const announceText = document.getElementById('announce-text');
@@ -323,11 +332,13 @@ function syncNavBack() {
   const onPause = !pauseEl?.classList.contains('hidden');
   const onResults = !resultsEl?.classList.contains('hidden');
   const onInbox = !inboxEl?.classList.contains('hidden');
+  const onArmory = !armoryEl?.classList.contains('hidden');
+  const onRewards = !rewardsEl?.classList.contains('hidden');
   const hostModal = !document.getElementById('mp-host-modal')?.classList.contains('hidden');
   const inviteModal = !document.getElementById('mp-invite-friend-modal')?.classList.contains('hidden');
   const visible =
     input.isTouchUi &&
-    (onOptions || onMp || onPause || onResults || onInbox || hostModal || inviteModal) &&
+    (onOptions || onMp || onPause || onResults || onInbox || onArmory || onRewards || hostModal || inviteModal) &&
     state !== 'playing';
   btn.classList.toggle('hidden', !visible);
 }
@@ -350,6 +361,10 @@ function navigateBack() {
     return;
   }
   if (!inboxEl?.classList.contains('hidden')) {
+    showScreen('menu');
+    return;
+  }
+  if (!armoryEl?.classList.contains('hidden') || !rewardsEl?.classList.contains('hidden')) {
     showScreen('menu');
     return;
   }
@@ -379,7 +394,9 @@ function navigateBack() {
 }
 
 function showScreen(id) {
-  [menuEl, optionsEl, pauseEl, resultsEl, mpEl, inboxEl].forEach((el) => el?.classList.add('hidden'));
+  [menuEl, optionsEl, pauseEl, resultsEl, mpEl, inboxEl, armoryEl, rewardsEl].forEach((el) =>
+    el?.classList.add('hidden')
+  );
   if (id === 'menu') menuEl?.classList.remove('hidden');
   if (id === 'options') optionsEl?.classList.remove('hidden');
   if (id === 'pause') {
@@ -399,6 +416,18 @@ function showScreen(id) {
     openInboxScreen();
   } else {
     closeInboxScreen();
+  }
+  if (id === 'armory') {
+    armoryEl?.classList.remove('hidden');
+    openArmory();
+  } else {
+    closeArmory();
+  }
+  if (id === 'rewards') {
+    rewardsEl?.classList.remove('hidden');
+    openRewards();
+  } else {
+    closeRewards();
   }
   syncWorldVisibility();
   syncTouchUi();
@@ -483,6 +512,9 @@ function ensureWorld(mapId = selectedMapId, worldSeed = null) {
         : randomWorldSeed();
   sessionWorldSeed = seed;
   if (!weapons) weapons = new WeaponSystem(scene);
+  if (!playerFlares) playerFlares = new FlareSystem(scene);
+  playerFlares.reset();
+  maneuvers.reset();
   if (!world) {
     world = new World(scene, settings.quality, mapId, seed);
     particles = new ParticleSystem(scene);
@@ -795,6 +827,7 @@ function startGame(mode, mapOverride = null) {
   clearModes();
   hud.toast(`${t('worldSeed')}: ${sessionWorldSeed}`, 2200);
   weapons?.clear();
+  playerFlares?.clear();
   gameMode = mode;
   state = 'playing';
   flightTime = 0;
@@ -909,6 +942,9 @@ function startGame(mode, mapOverride = null) {
     } else {
       weapons.setEnabled(DEFAULT_WEAPON_FLAGS);
     }
+    // Seed ammo from the player's inventory (guest defaults when logged out).
+    weapons.setAmmo(ammoFromState(getEconomyState()));
+    weapons.resetAmmoUsed();
   }
 
   if (mode === 'race') {
@@ -922,6 +958,13 @@ function startGame(mode, mapOverride = null) {
   } else {
     hud.toast(`${t('freeRoamToast')} · A/D=turn · Shift=speed · X=slow · S=takeoff`);
   }
+}
+
+/** Append the coin reward to the results body once the server responds. */
+function showCoinsEarned(coins) {
+  if (!coins || coins <= 0) return;
+  const el = document.getElementById('results-body');
+  if (el) el.textContent = `${el.textContent}\n+${coins} ${t('coins')}`;
 }
 
 function endGame(title, body) {
@@ -953,7 +996,13 @@ function endGame(title, body) {
       score: scoreVal,
       mapId: world?.mapId,
       flightTimeSec: flightTime,
-    }).catch(() => {});
+      metadata: { ammoUsed: weapons ? { ...weapons.ammoUsed } : {} },
+    })
+      .then((res) => {
+        showCoinsEarned(res?.coinsEarned);
+        refreshEconomy();
+      })
+      .catch(() => {});
   }
 
   document.getElementById('results-title').textContent = title;
@@ -1020,7 +1069,13 @@ function endMpMatch(reason = 'time', opts = {}) {
       score: mpKills,
       mapId: world?.mapId,
       flightTimeSec: flightTime,
-    }).catch(() => {});
+      metadata: { ammoUsed: weapons ? { ...weapons.ammoUsed } : {} },
+    })
+      .then((res) => {
+        showCoinsEarned(res?.coinsEarned);
+        refreshEconomy();
+      })
+      .catch(() => {});
   }
 
   mpLocalVote = null;
@@ -2121,6 +2176,26 @@ document.querySelectorAll('[data-action]').forEach((btn) => {
       showScreen('menu');
       return;
     }
+    if (action === 'armory') {
+      showScreen('armory');
+      return;
+    }
+    if (action === 'close-armory') {
+      showScreen('menu');
+      return;
+    }
+    if (action === 'rewards') {
+      if (!isLoggedIn()) {
+        openAuthModal();
+        return;
+      }
+      showScreen('rewards');
+      return;
+    }
+    if (action === 'close-rewards') {
+      showScreen('menu');
+      return;
+    }
     if (action === 'mp-host-open') {
       if (!requireMpLogin()) return;
       if (!canOpenNewHostSession()) {
@@ -2415,6 +2490,9 @@ scene.background = new THREE.Color(0x143a5c);
   await setupAuthUI();
   setupPushNotifications();
   setupInboxUI();
+  setupArmoryUI();
+  setupEconomyUI({ toast: (msg) => hud.toast(msg, 2600) });
+  refreshEconomy();
   setInboxJoinLobbyHandler((roomId) => {
     showScreen('multiplayer');
     if (isLoggedIn()) joinMatch(roomId);
@@ -2570,7 +2648,8 @@ function buildHitTargets() {
       kind: 'peer',
       owner: 'remote',
     });
-    if (!mpDying) {
+    // Dodge grants brief i-frames vs projectiles/homing.
+    if (!mpDying && !maneuvers.isDodging) {
       hitTargets.push({
         position: flight.position,
         radius: flight.hitRadius ?? 3.2,
@@ -2579,6 +2658,9 @@ function buildHitTargets() {
         owner: 'local',
       });
     }
+  }
+  if (playerFlares) {
+    hitTargets.push(...playerFlares.getDecoyTargets());
   }
   return hitTargets;
 }
@@ -2646,12 +2728,18 @@ function updateAimReticle(hitTargets, dt) {
     _assistStickyKind = null;
   }
 
+  // Only the homing missile can acquire a hard lock; other weapons keep
+  // soft aim-assist but never lock on.
+  const homingSelected = weapons.activeId === 'missile';
+  if (!homingSelected && (targetLock.lockId != null || targetLock.acquire > 0)) {
+    targetLock.clear();
+  }
   const touchAutoLock =
     touchCombat &&
     !!assistHit?.target &&
     (assistHit.target.kind === 'ai' || assistHit.target.kind === 'peer');
-  const lockHeld = input.lockHeld || touchAutoLock;
-  _lockHeldActive = lockHeld;
+  const lockHeld = homingSelected && (input.lockHeld || touchAutoLock);
+  _lockHeldActive = input.lockHeld || touchAutoLock;
 
   targetLock.update(dt, hitTargets, assistHit, lockHeld, flight.position, _aimDir);
   const locked = targetLock.getLockedTarget(hitTargets);
@@ -2730,10 +2818,106 @@ function updateAimReticle(hitTargets, dt) {
   );
 }
 
+/** Flare / dodge / quick-reverse triggers (edge-polled each frame). */
+function handleAbilityInputs() {
+  if (gameMode === 'race') return;
+
+  if (input.flarePressed && playerFlares && !flight.onGround) {
+    if (playerFlares.deploy(flight)) {
+      // Spoof hostile homing missiles currently tracking the player.
+      for (const b of weapons?.bullets || []) {
+        if (b.homing && b.owner !== 'local' && b.lockKind === 'self') b.lockBroken = true;
+      }
+      hud.toast(`${t('flare')}: ${playerFlares.stock}`);
+      sound.playUI('click');
+    } else if (playerFlares.stock <= 0) {
+      hud.toast(t('noFlares'));
+      sound.playUI('warn');
+    }
+  }
+
+  if (input.dodgePressed) {
+    const raw = input.getFlightInput();
+    const dir = (raw.roll || -raw.turn || 1) >= 0 ? 1 : -1;
+    if (maneuvers.startDodge(flight, dir)) {
+      sound.playUI('click');
+      if (settings.camShake) camRig.addShake(0.1);
+      // Good chance to shake off missiles mid-flight
+      for (const b of weapons?.bullets || []) {
+        if (b.homing && b.owner !== 'local' && b.lockKind === 'self' && Math.random() < 0.7) {
+          b.lockBroken = true;
+        }
+      }
+    } else if (!maneuvers.dodgeReady && !flight.onGround) {
+      hud.toast(t('abilityNotReady'));
+      sound.playUI('warn');
+    }
+  }
+
+  if (input.reversePressed) {
+    if (maneuvers.startReverse(flight)) {
+      sound.playRocket();
+      if (settings.camShake) camRig.addShake(0.16);
+      hud.toast(t('quickTurn'));
+    } else if (!maneuvers.reverseReady && !flight.onGround) {
+      hud.toast(t('abilityNotReady'));
+      sound.playUI('warn');
+    }
+  }
+}
+
+function syncAbilityBtn(id, ready, cdFrac, hidden = false) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.classList.toggle('hidden', hidden);
+  btn.classList.toggle('cooling', !ready);
+  btn.style.setProperty('--cd', String(Math.max(0, Math.min(1, cdFrac || 0))));
+}
+
+function updateAbilityHud() {
+  const el = document.getElementById('hud-abilities');
+  const isRace = gameMode === 'race';
+  if (el) {
+    const wrap = el.closest('.hud-abilities-gauge');
+    wrap?.classList.toggle('hidden', isRace);
+    if (!isRace) {
+      const flr = playerFlares ? playerFlares.stock : 0;
+      const dge = maneuvers.dodgeCooldown <= 0 ? '✓' : `${Math.ceil(maneuvers.dodgeCooldown)}`;
+      const rev = maneuvers.reverseCooldown <= 0 ? '✓' : `${Math.ceil(maneuvers.reverseCooldown)}`;
+      el.textContent = `F${flr} D${dge} R${rev}`;
+    }
+  }
+  syncAbilityBtn(
+    'touch-flare',
+    !!playerFlares?.ready,
+    playerFlares ? playerFlares.cooldown / playerFlares.cooldownTime : 0,
+    isRace
+  );
+  syncAbilityBtn('touch-dodge', maneuvers.dodgeReady, maneuvers.dodgeCooldown / DODGE_COOLDOWN, isRace);
+  syncAbilityBtn(
+    'touch-reverse',
+    maneuvers.reverseReady,
+    maneuvers.reverseCooldown / REVERSE_COOLDOWN,
+    isRace
+  );
+}
+
+let _lastEmptyToastAt = 0;
+
 function tryFire(fi, hitTargets) {
   if (!fi.fire || !weapons) return;
   if (gameMode === 'race') return;
   if (gameMode === 'multiplayer' && !mpLobby.weapons) return;
+
+  if (!weapons.hasAmmo() && weapons.enabled[weapons.activeId]) {
+    const now = performance.now();
+    if (now - _lastEmptyToastAt > 1400) {
+      _lastEmptyToastAt = now;
+      hud.toast(t('outOfAmmo'));
+      sound.playUI('warn');
+    }
+    return;
+  }
 
   const origin = flight.position.clone().addScaledVector(flight.forward, 3.2);
   const locked = targetLock.getLockedTarget(hitTargets);
@@ -2806,7 +2990,9 @@ function updatePlaying(dt) {
     sound.playUI('click');
   }
 
-  const fi = getFlightInputAdjusted();
+  handleAbilityInputs();
+
+  const fi = maneuvers.filterInput(getFlightInputAdjusted());
   if (settings.mouseLook) {
     input.mouse.x *= settings.mouseSens;
     input.mouse.y *= settings.mouseSens;
@@ -2820,7 +3006,14 @@ function updatePlaying(dt) {
 
   if (!(gameMode === 'multiplayer' && mpDying && !mpMatchEnded)) {
     flight.update(dt, fi, (x, z) => world.getHeight(x, z));
+    const finished = maneuvers.update(dt, flight);
+    if (finished === 'reverse') camRig.addShake(settings.camShake ? 0.1 : 0);
+    if (maneuvers.isReversing && settings.particles) {
+      particles.emitSpeedLines(flight.position, flight.forward, 1);
+    }
   }
+  playerFlares?.update(dt);
+  updateAbilityHud();
 
   if (fuelDrops?.enabled) {
     const got = fuelDrops.update(dt, flight.position, (x, z) => world.getHeight(x, z));
@@ -3136,8 +3329,14 @@ function updatePlaying(dt) {
           ? t('modeMp')
           : t('modeCombat');
 
+  // MP: size the dial to the territory so the arena fills the radar instead of
+  // crowding the center third (territory is ~190-230m depending on map).
   const radarRange =
-    gameMode === 'combat' ? 800 : gameMode === 'multiplayer' ? 650 : 240;
+    gameMode === 'combat'
+      ? 800
+      : gameMode === 'multiplayer'
+        ? Math.max(300, (world.mpTerritory || 220) * 1.35)
+        : 240;
 
   if (!settings.camShake) camRig.shake = 0;
   camRig.update(dt, flight, {
@@ -3178,7 +3377,10 @@ function updatePlaying(dt) {
     territory: territoryHud,
     mapTint: 'rgba(12, 36, 56, 0.82)',
     onGround: flight.onGround,
-    weaponLabel: weapons ? t(weapons.active.nameKey) : '',
+    weaponLabel: weapons
+      ? `${t(weapons.active.nameKey)} · ${Number.isFinite(weapons.getAmmo()) ? weapons.getAmmo() : '∞'}`
+      : '',
+    weaponEmpty: weapons ? !weapons.hasAmmo() : false,
     radarRange,
   });
 }

@@ -39,6 +39,7 @@
       <button type="button" class="tab" data-tab="announcement">Announcement</button>
       <button type="button" class="tab" data-tab="messages">Messages</button>
       <button type="button" class="tab" data-tab="push">Android Push</button>
+      <button type="button" class="tab" data-tab="grants">Rewards</button>
       <button type="button" class="tab" data-tab="ipbans">IP Bans</button>
       <button type="button" class="tab" data-tab="security">Security Log</button>
     </nav>
@@ -190,6 +191,64 @@
           <div class="form-actions">
             <button type="submit">Send Android notification</button>
             <span id="push-status" class="status-msg hidden"></span>
+          </div>
+        </form>
+      </div>
+
+      <div id="tab-grants" class="tab-pane hidden">
+        <p class="pane-desc">
+          Give coins, weapon ammo, or Wheel of Luck spins to one user, several users, or everyone.
+          Recipients get an inbox note automatically.
+        </p>
+        <form id="grant-form" class="announce-form">
+          <fieldset class="mode-fieldset">
+            <legend>Recipients</legend>
+            <label class="check-row">
+              <input type="radio" name="grant-mode" value="single" checked />
+              <span>Single user</span>
+            </label>
+            <label class="check-row">
+              <input type="radio" name="grant-mode" value="multi" />
+              <span>Multiple users (comma or newline separated)</span>
+            </label>
+            <label class="check-row">
+              <input type="radio" name="grant-mode" value="all" />
+              <span>All users</span>
+            </label>
+          </fieldset>
+          <label id="grant-users-wrap">
+            User ID(s)
+            <textarea id="grant-user-ids" rows="2" placeholder="UUID from Users tab (one or more, comma / newline separated)"></textarea>
+          </label>
+          <div class="grant-grid">
+            <label>
+              Coins
+              <input type="number" id="grant-coins" min="0" step="1" value="0" />
+            </label>
+            <label>
+              Cannon ammo
+              <input type="number" id="grant-cannon" min="0" step="1" value="0" />
+            </label>
+            <label>
+              Rockets
+              <input type="number" id="grant-rocket" min="0" step="1" value="0" />
+            </label>
+            <label>
+              Missiles
+              <input type="number" id="grant-missile" min="0" step="1" value="0" />
+            </label>
+            <label>
+              Wheel spins
+              <input type="number" id="grant-spins" min="0" step="1" value="0" />
+            </label>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="grant-notify" checked />
+            <span>Send an inbox message telling recipients what they received</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit">Grant rewards</button>
+            <span id="grant-status" class="status-msg hidden"></span>
           </div>
         </form>
       </div>

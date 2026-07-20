@@ -1,7 +1,9 @@
 /**
  * Eight arcade aircraft — each with unique silhouette, colors, flight feel, and physics body.
+ * Every plane mounts all 4 weapons as visible hardpoints (MG pod, cannon, rocket pods, missiles).
  */
 import * as THREE from 'three';
+import { createHardpointModel } from './weaponModels.js';
 
 /** Derive wheel/collision dimensions from visual scale + per-type overrides. */
 function physique(scale, overrides = {}) {
@@ -318,6 +320,156 @@ export const PLANE_TYPES = [
 /** @deprecated use PLANE_TYPES */
 export const SKINS = PLANE_TYPES.map((p) => ({ name: p.nameKey, ...p.colors }));
 
+/**
+ * Weapon mount points per plane (pre-scale local units, +Z forward).
+ * gun/cannon: centerline pods. rockets/missiles: mirrored ±x under-wing.
+ * wingtip: nav-light position (mirrored).
+ */
+const HARDPOINTS = {
+  poky: {
+    scale: 0.5,
+    gun: [0, -0.28, 1.0],
+    cannon: [0, -0.38, 0.35],
+    rockets: [1.3, -0.16, 0.05],
+    missiles: [1.9, -0.14, 0.0],
+    wingtip: [2.5, 0.22, 0.05],
+    antenna: [0, 0.35, -0.9],
+  },
+  whale: {
+    scale: 0.7,
+    gun: [0, -0.28, 2.25],
+    cannon: [0, -0.52, 0.8],
+    rockets: [1.2, -0.28, 0.2],
+    missiles: [2.6, -0.22, 0.2],
+    wingtip: [2.6, 0.05, 0.2],
+  },
+  banana: {
+    scale: 0.45,
+    gun: [0, -0.18, 1.05],
+    cannon: [0, -0.36, 0.3],
+    rockets: [0.9, -0.08, 0.15],
+    missiles: [1.35, -0.06, 0.1],
+    wingtip: [1.4, 0.55, 0.15],
+  },
+  falcon: {
+    scale: 0.55,
+    gun: [0, -0.3, 1.2],
+    cannon: [0, -0.4, 0.4],
+    rockets: [0.7, -0.26, 0.25],
+    missiles: [1.25, -0.3, 0.05],
+    wingtip: [1.55, 0.24, 0.0],
+    antenna: [0, 0.3, -0.55],
+  },
+  moth: {
+    scale: 0.3,
+    gun: [0, -0.12, 0.5],
+    cannon: [0, -0.18, 0.12],
+    rockets: [0.5, -0.08, 0.05],
+    missiles: [0.82, -0.07, 0.0],
+    wingtip: [1.1, 0.02, 0.05],
+  },
+  fortress: {
+    scale: 0.7,
+    gun: [0, -0.3, 1.45],
+    cannon: [0, -0.48, 0.5],
+    rockets: [0.8, -0.22, 0.15],
+    missiles: [1.85, -0.2, 0.15],
+    wingtip: [2.0, 0.05, 0.15],
+    antenna: [0, 0.5, -0.7],
+  },
+  loopy: {
+    scale: 0.45,
+    gun: [0, -0.22, 0.85],
+    cannon: [0, -0.4, 0.2],
+    rockets: [0.8, -0.08, 0.05],
+    missiles: [1.3, -0.07, 0.0],
+    wingtip: [1.85, 0.05, 0.1],
+  },
+  neon: {
+    scale: 0.48,
+    gun: [0, -0.22, 1.0],
+    cannon: [0, -0.32, 0.3],
+    rockets: [0.75, -0.15, 0.0],
+    missiles: [1.15, -0.14, -0.05],
+    wingtip: [1.3, -0.02, 0.05],
+  },
+};
+
+/** Attach all 4 weapon mounts + wingtip nav lights to a built plane group. */
+function attachHardpoints(group, type) {
+  const hp = HARDPOINTS[type.id];
+  if (!hp) return null;
+  const s = hp.scale;
+  const root = new THREE.Group();
+  root.name = 'hardpoints';
+  const pylonMat = new THREE.MeshStandardMaterial({
+    color: 0x4b5563,
+    roughness: 0.5,
+    metalness: 0.35,
+    flatShading: true,
+  });
+
+  const put = (weaponId, [x, y, z], withPylon = false) => {
+    const model = createHardpointModel(weaponId, s);
+    model.position.set(x, y, z);
+    root.add(model);
+    if (withPylon) {
+      const pylon = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05 * s * 2, 0.16 * s * 2, 0.24 * s * 2),
+        pylonMat
+      );
+      pylon.position.set(x, y + 0.14 * s * 2, z);
+      root.add(pylon);
+    }
+    return model;
+  };
+
+  if (hp.gun) put('mg', hp.gun);
+  if (hp.cannon) put('cannon', hp.cannon);
+  if (hp.antenna) {
+    const mast = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.015, 0.02, 0.34 * s * 2, 5),
+      pylonMat
+    );
+    mast.position.set(hp.antenna[0], hp.antenna[1] + 0.17 * s * 2, hp.antenna[2]);
+    const tip = new THREE.Mesh(
+      new THREE.SphereGeometry(0.03, 6, 6),
+      new THREE.MeshStandardMaterial({
+        color: type.colors.stripe,
+        emissive: type.colors.stripe,
+        emissiveIntensity: 0.4,
+        flatShading: true,
+      })
+    );
+    tip.position.set(hp.antenna[0], hp.antenna[1] + 0.34 * s * 2, hp.antenna[2]);
+    root.add(mast, tip);
+  }
+  for (const side of [-1, 1]) {
+    if (hp.rockets) {
+      put('rocket', [side * hp.rockets[0], hp.rockets[1], hp.rockets[2]], true);
+    }
+    if (hp.missiles) {
+      put('missile', [side * hp.missiles[0], hp.missiles[1], hp.missiles[2]], true);
+    }
+    if (hp.wingtip) {
+      const navLight = new THREE.Mesh(
+        new THREE.SphereGeometry(0.045, 6, 6),
+        new THREE.MeshStandardMaterial({
+          color: side < 0 ? 0xff4444 : 0x44ff66,
+          emissive: side < 0 ? 0xdd2222 : 0x22cc44,
+          emissiveIntensity: 0.9,
+          flatShading: true,
+        })
+      );
+      navLight.position.set(side * hp.wingtip[0], hp.wingtip[1], hp.wingtip[2]);
+      root.add(navLight);
+    }
+  }
+
+  group.add(root);
+  return root;
+}
+
 function mat(color, extras = {}) {
   return new THREE.MeshStandardMaterial({
     color,
@@ -438,6 +590,7 @@ function addShadow(group, radius = 1.2) {
 }
 
 function finishPlane(group, parts, type, typeIndex) {
+  parts.hardpoints = attachHardpoints(group, type);
   group.scale.setScalar(type.stats.scale);
   group.name = type.id;
   parts.planeType = type.id;
@@ -737,15 +890,6 @@ function buildFalcon(type, typeIndex) {
   aileronR.position.x = 1.35;
   aileronR.name = 'aileron';
   group.add(wingL, wingR, aileronL, aileronR);
-
-  const missile = (x) => {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.55, 6), accentMat);
-    m.rotation.x = Math.PI / 2;
-    m.position.set(x, -0.12, 0.35);
-    group.add(m);
-  };
-  missile(-0.35);
-  missile(0.35);
 
   const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.55, 0.5), bodyMat);
   tail.position.set(0, 0.35, -1.15);

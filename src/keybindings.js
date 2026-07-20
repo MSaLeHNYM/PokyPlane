@@ -21,6 +21,9 @@ export const DEFAULT_KEY_BINDINGS = {
   weapon2: ['Digit2'],
   weapon3: ['Digit3'],
   weapon4: ['Digit4'],
+  flare: ['KeyG'],
+  dodge: ['KeyR'],
+  quickTurn: ['KeyV'],
 };
 
 export const KEY_BIND_ACTIONS = [
@@ -41,6 +44,9 @@ export const KEY_BIND_ACTIONS = [
   'weapon2',
   'weapon3',
   'weapon4',
+  'flare',
+  'dodge',
+  'quickTurn',
 ];
 
 const KEY_LABELS = {
